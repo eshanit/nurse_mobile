@@ -8,6 +8,8 @@
  */
 
 import PouchDB from 'pouchdb-browser';
+import { getSecureDb, secureGet, secureFind, isSecureDbReady, initializeSecureDb } from './secureDb';
+import { useSecurityStore } from '~/stores/security';
 
 // Type definitions for PouchDB events
 interface PouchDBChangeEvent {
@@ -199,7 +201,7 @@ export const syncLogger = new SyncLogger();
 export class SyncService {
   private db: PouchDB.Database | null = null;
   private remoteDb: PouchDB.Database | null = null;
-  private syncEmitter: PouchDB.Replication.Sync<unknown> | null = null;
+  private syncEmitter: PouchDB.Replication.Sync<{}> | null = null;
   private config: SyncConfig;
   private currentRetryCount: number = 0;
   private isSyncing: boolean = false;
@@ -215,8 +217,24 @@ export class SyncService {
    * Initialize the sync service
    */
   async initialize(): Promise<void> {
-    const pouchService = getPouchDBService();
-    this.db = (pouchService as unknown as { db: PouchDB.Database }).db;
+    // Ensure encryption key is available
+    const securityStore = useSecurityStore();
+    if (!securityStore.encryptionKey) {
+      await securityStore.ensureEncryptionKey();
+    }
+    
+    const key = securityStore.encryptionKey;
+    if (!key) {
+      throw new Error('[SyncService] No encryption key available');
+    }
+    
+    // Initialize secure database if not already done
+    if (!isSecureDbReady()) {
+      await initializeSecureDb(key);
+    }
+    
+    // Get the secure database instance
+    this.db = getSecureDb(key);
     
     if (!this.db) {
       throw new Error('PouchDB not initialized');
@@ -397,7 +415,7 @@ export class SyncService {
   /**
    * Perform a one-time sync (not live)
    */
-  async syncOnce(): Promise<PouchDB.Replication.SyncResult> {
+  async syncOnce(): Promise<PouchDB.Replication.SyncResult<{}>> {
     if (!this.db || !this.config.remoteUrl) {
       throw new Error('Database not initialized or remote URL not configured');
     }
@@ -565,28 +583,19 @@ const PRIORITY_ORDER: Record<string, number> = {
  * - Action plan requirement for RED cases
  */
 export class ClinicalSyncQueue {
-  private pouchService: unknown;
-  
-  constructor() {
-    // Import PouchDB service dynamically to avoid circular dependencies
-    import('./pouchdb').then(module => {
-      this.pouchService = module.getPouchDBService();
-    }).catch(() => {
-      console.warn('[ClinicalSyncQueue] PouchDB service not available');
-    });
-  }
-
   /**
    * Get pending forms sorted by clinical priority
    * RED cases sync first, then YELLOW, then GREEN
    */
-  async getPendingFormsByPriority(): Promise<unknown[]> {
+  async getPendingFormsByPriority(): Promise<Record<string, unknown>[]> {
     try {
       const pendingForms = await this.getPendingForms();
       
       return pendingForms.sort((a, b) => {
-        const priorityA = PRIORITY_ORDER[(a as Record<string, unknown>).calculated?.triagePriority as string] ?? 3;
-        const priorityB = PRIORITY_ORDER[(b as Record<string, unknown>).calculated?.triagePriority as string] ?? 3;
+        const formA = a as Record<string, Record<string, unknown>>;
+        const formB = b as Record<string, Record<string, unknown>>;
+        const priorityA = PRIORITY_ORDER[formA.calculated?.triagePriority as string] ?? 3;
+        const priorityB = PRIORITY_ORDER[formB.calculated?.triagePriority as string] ?? 3;
         return priorityA - priorityB;
       });
     } catch (error) {
@@ -607,19 +616,23 @@ export class ClinicalSyncQueue {
         return { canSync: false, reason: 'Form not found' };
       }
       
+      const formData = form as Record<string, unknown>;
+      
       // Critical: Must have completed required protocol steps
-      if (form.status !== 'completed') {
+      if (formData.status !== 'completed') {
         return { canSync: false, reason: 'Form not clinically completed' };
       }
       
       // Must have triage priority calculated
-      if (!form.calculated?.triagePriority) {
+      const calculated = formData.calculated as Record<string, unknown> | undefined;
+      if (!calculated?.triagePriority) {
         return { canSync: false, reason: 'Triage not calculated' };
       }
       
       // For RED cases: additional validation
-      if (form.calculated.triagePriority === 'red') {
-        const hasActionPlan = form.answers?.['action_plan_urgent'];
+      if (calculated.triagePriority === 'red') {
+        const answers = formData.answers as Record<string, unknown> | undefined;
+        const hasActionPlan = answers?.['action_plan_urgent'];
         if (!hasActionPlan) {
           return { canSync: false, reason: 'Urgent cases require action plan' };
         }
@@ -635,21 +648,33 @@ export class ClinicalSyncQueue {
   /**
    * Get all pending forms from local storage
    */
-  private async getPendingForms(): Promise<unknown[]> {
+  private async getPendingForms(): Promise<Record<string, unknown>[]> {
     try {
-      // Access pouchDB service to get pending documents
-      const pouchDb = await import('./pouchdb');
-      const db = pouchDb.getPouchDBService() as { db: { allDocs: (options: unknown) => Promise<{ rows: Array<{ doc: unknown }> }> } };
-      
-      if (db?.db?.allDocs) {
-        const result = await db.db.allDocs({ include_docs: true });
-        return result.rows
-          .filter(row => !row.id.startsWith('_design/'))
-          .map(row => row.doc)
-          .filter(doc => (doc as Record<string, unknown>).status !== 'synced');
+      // Ensure encryption key is available
+      const securityStore = useSecurityStore();
+      if (!securityStore.encryptionKey) {
+        await securityStore.ensureEncryptionKey();
       }
       
-      return [];
+      const key = securityStore.encryptionKey;
+      if (!key) {
+        console.warn('[ClinicalSyncQueue] No encryption key available');
+        return [];
+      }
+      
+      // Check if secure DB is ready
+      if (!isSecureDbReady()) {
+        console.warn('[ClinicalSyncQueue] Secure database not initialized');
+        return [];
+      }
+      
+      // Use secureFind to get pending documents (not synced)
+      const pendingResult = await secureFind<Record<string, unknown>>(
+        { status: { $ne: 'synced' } },
+        key
+      );
+      
+      return pendingResult;
     } catch {
       console.warn('[ClinicalSyncQueue] Could not access pending forms');
       return [];
@@ -661,14 +686,20 @@ export class ClinicalSyncQueue {
    */
   private async loadInstance(formId: string): Promise<Record<string, unknown> | null> {
     try {
-      const pouchDb = await import('./pouchdb');
-      const db = pouchDb.getPouchDBService() as { db: { get: (id: string) => Promise<Record<string, unknown>> } };
-      
-      if (db?.db?.get) {
-        return await db.db.get(formId);
+      // Ensure encryption key is available
+      const securityStore = useSecurityStore();
+      if (!securityStore.encryptionKey) {
+        await securityStore.ensureEncryptionKey();
       }
       
-      return null;
+      const key = securityStore.encryptionKey;
+      if (!key) {
+        console.warn('[ClinicalSyncQueue] No encryption key available');
+        return null;
+      }
+      
+      // Use secureGet to retrieve the form
+      return await secureGet<Record<string, unknown>>(formId, key);
     } catch {
       return null;
     }

@@ -16,7 +16,8 @@ export type FieldType =
   | 'timer'
   | 'calculated'
   | 'date'
-  | 'time';
+  | 'time'
+  | 'textarea';
 
 export type TriagePriority = 'red' | 'yellow' | 'green';
 
@@ -120,12 +121,18 @@ export interface FieldDefinition {
   label: string;
   description?: string;
   
+  // Options for select/radio fields
+  options?: string[];
+  
   // Clinical Context
   clinicalNote?: string;
   protocolReference?: string;
   
   // UI & Interaction
   uiHint?: 'urgent' | 'warning' | 'normal';
+  ui?: {
+    fullWidth?: boolean;
+  };
   placeholder?: string;
   helpText?: string;
   

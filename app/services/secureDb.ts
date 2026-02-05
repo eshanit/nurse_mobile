@@ -14,7 +14,7 @@
 
 import PouchDB from 'pouchdb-browser';
 import pouchdbFind from 'pouchdb-find';
-import { useSecurityStore } from '~/stores/security';
+import { encryptData, decryptData } from './encryptionUtils';
 
 // ============================================
 // PouchDB Plugins
@@ -40,70 +40,9 @@ export interface EncryptedPayload {
 export interface EncryptedDocument {
   _id: string;
   _rev?: string;
-  _encrypted: true;
-  _data: string;
-  _encryptedAt: string;
-}
-
-// ============================================
-// Encryption Utilities
-// ============================================
-
-async function encryptData(plaintext: string, key: Uint8Array): Promise<EncryptedPayload> {
-  const encoder = new TextEncoder();
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    key as BufferSource,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt']
-  );
-  
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    cryptoKey,
-    encoder.encode(plaintext)
-  );
-  
-  const encryptedArray = new Uint8Array(encrypted);
-  const ciphertext = encryptedArray.slice(0, -16);
-  const tag = encryptedArray.slice(-16);
-  
-  return {
-    ciphertext: btoa(String.fromCharCode(...ciphertext)),
-    iv: btoa(String.fromCharCode(...iv)),
-    tag: btoa(String.fromCharCode(...tag))
-  };
-}
-
-async function decryptData(payload: EncryptedPayload, key: Uint8Array): Promise<string> {
-  const decoder = new TextDecoder();
-  
-  const iv = Uint8Array.from(atob(payload.iv), (c) => c.charCodeAt(0));
-  const ciphertext = Uint8Array.from(atob(payload.ciphertext), (c) => c.charCodeAt(0));
-  const tag = Uint8Array.from(atob(payload.tag), (c) => c.charCodeAt(0));
-  
-  const encrypted = new Uint8Array(ciphertext.length + tag.length);
-  encrypted.set(ciphertext);
-  encrypted.set(tag, ciphertext.length);
-  
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    key as BufferSource,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['decrypt']
-  );
-  
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    cryptoKey,
-    encrypted
-  );
-  
-  return decoder.decode(decrypted);
+  encrypted: true;
+  data: string;
+  encryptedAt: string;
 }
 
 // ============================================
@@ -116,14 +55,12 @@ let dbName = 'healthbridge_secure';
 /**
  * Initialize the secure database
  */
-export async function initializeSecureDb(config?: SecureDbConfig): Promise<void> {
+export async function initializeSecureDb(encryptionKey: Uint8Array, config?: SecureDbConfig): Promise<void> {
   if (config?.dbName) {
     dbName = config.dbName;
   }
   
-  const security = useSecurityStore();
-  
-  if (!security.encryptionKey) {
+  if (!encryptionKey) {
     throw new Error('[SecureDB] Cannot initialize: no encryption key available');
   }
   
@@ -141,11 +78,9 @@ export async function initializeSecureDb(config?: SecureDbConfig): Promise<void>
 /**
  * Get the secure database instance
  */
-export function getSecureDb(): PouchDB.Database {
-  const security = useSecurityStore();
-  
-  if (!security.isUnlocked || !security.encryptionKey) {
-    throw new Error('[SecureDB] Database locked: app must be unlocked first');
+export function getSecureDb(encryptionKey: Uint8Array): PouchDB.Database {
+  if (!encryptionKey) {
+    throw new Error('[SecureDB] Database locked: encryption key not available');
   }
   
   if (!dbInstance) {
@@ -159,8 +94,7 @@ export function getSecureDb(): PouchDB.Database {
  * Check if the secure database is ready
  */
 export function isSecureDbReady(): boolean {
-  const security = useSecurityStore();
-  return security.isUnlocked && security.encryptionKey !== null && dbInstance !== null;
+  return dbInstance !== null;
 }
 
 /**
@@ -190,12 +124,12 @@ export async function deleteSecureDb(): Promise<void> {
 // ============================================
 
 export async function securePut<T extends { _id: string; _rev?: string }>(
-  doc: T
+  doc: T,
+  encryptionKey: Uint8Array
 ): Promise<{ id: string; rev: string }> {
-  const db = getSecureDb();
-  const security = useSecurityStore();
+  const db = getSecureDb(encryptionKey);
   
-  if (!security.encryptionKey) {
+  if (!encryptionKey) {
     throw new Error('[SecureDB] Cannot put: encryption key not available');
   }
   
@@ -209,42 +143,61 @@ export async function securePut<T extends { _id: string; _rev?: string }>(
     }
   }
   
-  const encryptedPayload = await encryptData(JSON.stringify(dataToEncrypt), security.encryptionKey);
+  const encryptedPayload = await encryptData(JSON.stringify(dataToEncrypt), encryptionKey);
   
-  const encryptedDoc: EncryptedDocument = {
+  const encryptedDoc: EncryptedDocument & { _rev?: string } = {
     _id,
-    _encrypted: true,
-    _data: JSON.stringify(encryptedPayload),
-    _encryptedAt: new Date().toISOString()
+    encrypted: true,
+    data: JSON.stringify(encryptedPayload),
+    encryptedAt: new Date().toISOString()
   };
   
   if (_rev) {
     encryptedDoc._rev = _rev;
   }
   
-  const result = await db.put(encryptedDoc);
-  return { id: result.id, rev: result.rev };
+  try {
+    const result = await db.put(encryptedDoc);
+    return { id: result.id, rev: result.rev };
+  } catch (error) {
+    const pouchError = error as { status?: number; message?: string };
+    
+    // Handle conflict (409) by getting latest and retrying
+    if (pouchError.status === 409) {
+      console.warn('[SecureDB] Document conflict, retrying with latest revision...');
+      
+      // Get the latest document
+      const latest = await db.get(_id) as EncryptedDocument & { _rev?: string };
+      encryptedDoc._rev = latest._rev;
+      
+      // Retry with correct revision
+      const result = await db.put(encryptedDoc);
+      return { id: result.id, rev: result.rev };
+    }
+    
+    throw error;
+  }
 }
 
 export async function secureGet<T>(
-  id: string
+  id: string,
+  encryptionKey: Uint8Array
 ): Promise<T | null> {
-  const db = getSecureDb();
-  const security = useSecurityStore();
+  const db = getSecureDb(encryptionKey);
   
-  if (!security.encryptionKey) {
+  if (!encryptionKey) {
     throw new Error('[SecureDB] Cannot get: encryption key not available');
   }
   
   try {
     const doc = await db.get(id) as EncryptedDocument & { _rev?: string };
     
-    if (!doc._encrypted) {
+    if (!doc.encrypted) {
       return doc as unknown as T;
     }
     
-    const payload: EncryptedPayload = JSON.parse(doc._data);
-    const decryptedData = JSON.parse(await decryptData(payload, security.encryptionKey));
+    const payload: EncryptedPayload = JSON.parse(doc.data);
+    const decryptedData = JSON.parse(await decryptData(payload, encryptionKey));
     
     return {
       _id: doc._id,
@@ -260,28 +213,30 @@ export async function secureGet<T>(
 }
 
 export async function secureFind<T>(
-  selector: Record<string, unknown>
+  selector: Record<string, unknown>,
+  encryptionKey: Uint8Array
 ): Promise<T[]> {
-  const db = getSecureDb();
+  const db = getSecureDb(encryptionKey);
   const result = await db.find({ selector });
   return result.docs as unknown as T[];
 }
 
 export async function secureDelete(
   id: string,
-  rev: string
+  rev: string,
+  encryptionKey: Uint8Array
 ): Promise<{ id: string; rev: string; ok: boolean }> {
-  const db = getSecureDb();
+  const db = getSecureDb(encryptionKey);
   const result = await db.remove(id, rev);
   return { id: result.id, rev: result.rev, ok: result.ok };
 }
 
-export async function secureInfo(): Promise<{
+export async function secureInfo(encryptionKey: Uint8Array): Promise<{
   dbName: string;
   docCount: number;
   updateSeq: number;
 }> {
-  const db = getSecureDb();
+  const db = getSecureDb(encryptionKey);
   const info = await db.info();
   
   return {
@@ -291,30 +246,54 @@ export async function secureInfo(): Promise<{
   };
 }
 
-export async function secureAllDocs<T extends { _id: string; _rev?: string }>(): Promise<T[]> {
-  const db = getSecureDb();
-  const result = await db.allDocs({ include_docs: false });
+export async function secureAllDocs<T extends { _id: string; _rev?: string }>(
+  encryptionKey: Uint8Array
+): Promise<T[]> {
+  const db = getSecureDb(encryptionKey);
+  const result = await db.allDocs({ include_docs: true });
   
   const docs: T[] = [];
   for (const row of result.rows) {
-    if (!row.id.startsWith('_design/')) {
-      docs.push({ _id: row.id, _rev: row.value.rev } as T);
+    if (!row.id.startsWith('_design/') && row.doc) {
+      const doc = row.doc as EncryptedDocument & { _rev?: string };
+      
+      if (doc.encrypted) {
+        // Decrypt the document
+        try {
+          const payload: EncryptedPayload = JSON.parse(doc.data);
+          const decryptedData = JSON.parse(await decryptData(payload, encryptionKey));
+          docs.push({
+            _id: doc._id,
+            _rev: doc._rev,
+            ...decryptedData
+          } as T);
+        } catch (error) {
+          console.error('[SecureDB] Failed to decrypt document:', row.id, error);
+          // Skip corrupted documents
+        }
+      } else {
+        docs.push(row.doc as T);
+      }
     }
   }
   
   return docs;
 }
 
-export async function secureCreateIndex(fields: string[]): Promise<void> {
-  const db = getSecureDb();
+export async function secureCreateIndex(
+  fields: string[],
+  encryptionKey: Uint8Array
+): Promise<void> {
+  const db = getSecureDb(encryptionKey);
   await db.createIndex({ index: { fields } });
 }
 
 export async function secureCreateDesignDoc(
   designDocId: string,
-  views: Record<string, { map: string; reduce?: string }>
+  views: Record<string, { map: string; reduce?: string }>,
+  encryptionKey: Uint8Array
 ): Promise<void> {
-  const db = getSecureDb();
+  const db = getSecureDb(encryptionKey);
   
   const designDoc = {
     _id: `_design/${designDocId}`,
@@ -332,12 +311,13 @@ export interface BulkResult {
 }
 
 export async function secureBulkDocs<T extends { _id: string; _rev?: string }>(
-  docs: T[]
+  docs: T[],
+  encryptionKey: Uint8Array
 ): Promise<BulkResult[]> {
   const results = await Promise.all(
     docs.map(async (doc) => {
       try {
-        const result = await securePut(doc);
+        const result = await securePut(doc, encryptionKey);
         return { id: result.id, rev: result.rev, ok: true };
       } catch (error) {
         return { id: doc._id, error };

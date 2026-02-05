@@ -1,5 +1,8 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { secureAllDocs } from '~/services/secureDb';
+import { useSecurityStore } from '~/stores/security';
+import type { ClinicalFormInstance } from '~/types/clinical-form';
 
 // ============================================
 // Dashboard State Machine Types
@@ -54,6 +57,18 @@ export interface DashboardData {
 }
 
 // ============================================
+// Header Badge Type
+// ============================================
+
+export type BadgeColor = 'success' | 'error' | 'info' | 'warning' | 'primary' | 'secondary' | 'neutral';
+
+export interface HeaderBadge {
+  icon: string;
+  text: string;
+  color: BadgeColor;
+}
+
+// ============================================
 // Dashboard Store
 // ============================================
 
@@ -88,14 +103,14 @@ export const useDashboardStore = defineStore('dashboard', () => {
     isReady.value || isOffline.value
   );
 
-  const headerBadge = computed(() => {
+  const headerBadge = computed<HeaderBadge>(() => {
     switch (state.value) {
-      case 'LOCKED': return { icon: '🔒', text: 'Locked' };
-      case 'UNLOCKING': return { icon: '🔑', text: 'Unlocking' };
-      case 'READY': return { icon: '●', text: 'Online' };
-      case 'OFFLINE': return { icon: '○', text: 'Offline' };
-      case 'SYNCING': return { icon: '⟳', text: 'Syncing' };
-      case 'ERROR': return { icon: '🔴', text: 'Error' };
+      case 'LOCKED': return { icon: 'i-heroicons-lock-closed', text: 'Locked', color: 'neutral' };
+      case 'UNLOCKING': return { icon: 'i-heroicons-key', text: 'Unlocking', color: 'warning' };
+      case 'READY': return { icon: 'i-heroicons-check-circle', text: 'Online', color: 'success' };
+      case 'OFFLINE': return { icon: 'i-heroicons-wifi-slash', text: 'Offline', color: 'warning' };
+      case 'SYNCING': return { icon: 'i-heroicons-arrow-path', text: 'Syncing', color: 'info' };
+      case 'ERROR': return { icon: 'i-heroicons-exclamation-circle', text: 'Error', color: 'error' };
     }
   });
 
@@ -201,21 +216,53 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
 
     try {
-      // TODO: Replace with actual PouchDB queries
-      // const draft = await find({ type: 'encounter', status: 'draft' });
-      // const awaitingSync = await find({ status: { $in: ['finalized', 'ai_processed'] }, synced: false });
-      // const urgent = await find({ priority: 'red' });
-      // const recentItems = await find({ type: 'encounter' }, { sort: ['updated_at'], limit: 5 });
+      const security = useSecurityStore();
+      if (!security.encryptionKey) {
+        throw new Error('[Dashboard] Encryption key not available');
+      }
 
-      // Mock data for now
+      // Query all forms from secure database
+      const allForms = await secureAllDocs<ClinicalFormInstance>(security.encryptionKey);
+
+      // Count forms by status
+      const draftForms = allForms.filter(f => f.status === 'draft');
+      const pendingForms = allForms.filter(f => f.syncStatus === 'pending' || f.syncStatus === 'error');
+      const urgentForms = allForms.filter(f => f.calculated?.triagePriority === 'red');
+      
+      // Count by triage priority
+      const statsData = {
+        red: allForms.filter(f => f.calculated?.triagePriority === 'red').length,
+        yellow: allForms.filter(f => f.calculated?.triagePriority === 'yellow').length,
+        green: allForms.filter(f => f.calculated?.triagePriority === 'green').length,
+      };
+
+      // Update state
+      hasDraft.value = draftForms.length > 0;
+      awaitingSyncCount.value = pendingForms.length;
+      urgentCount.value = urgentForms.length;
+      stats.value = statsData;
+      
+      // Build recent activity list (most recent first)
+      recent.value = allForms
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .slice(0, 10)
+        .map(form => ({
+          id: form._id,
+          type: 'encounter' as const,
+          action: form.status === 'completed' ? 'finalized' as const : 'updated' as const,
+          title: form.patientName || form._id,
+          priority: form.calculated?.triagePriority || 'green',
+          updated_at: form.updatedAt,
+          synced: form.syncStatus === 'synced'
+        }));
+    } catch (error) {
+      // Fall back to mock data on error
+      console.warn('[Dashboard] Failed to load from database, using mock data:', error);
       hasDraft.value = false;
       awaitingSyncCount.value = 0;
       urgentCount.value = 0;
       stats.value = { red: 0, yellow: 0, green: 0 };
       recent.value = [];
-    } catch (error) {
-      transitionToError(error instanceof Error ? error.message : 'Failed to load dashboard');
-      throw error;
     }
   }
 

@@ -148,26 +148,26 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
     const encoder = new TextEncoder();
     const pinBuffer = encoder.encode(pin);
 
-    // Import PIN as raw key material for PBKDF2
+    // ✅ CORRECTED: Import PIN as raw key material for PBKDF2
     const keyMaterial = await crypto.subtle.importKey(
       'raw',
       pinBuffer,
-      'PBKDF2',
+      'PBKDF2',  // Use string, not object
       false,
-      ['deriveKey']
+      ['deriveKey']  // Changed from 'deriveBits' to 'deriveKey'
     );
 
-    // Derive key directly
+    // ✅ CORRECTED: Derive key directly (not bits)
     const derivedKey = await crypto.subtle.deriveKey(
       {
         name: 'PBKDF2',
         salt: salt.value!.buffer as ArrayBuffer,
-        iterations: 100000,
+        iterations: 100000, // Good for mobile devices
         hash: 'SHA-256'
       },
       keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      true,
+      { name: 'AES-GCM', length: 256 }, // Direct AES key
+      true, // Extractable so we can store it
       ['encrypt', 'decrypt']
     );
 
@@ -242,6 +242,7 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
    * Encrypt key for storage
    */
   async function encryptKeyForStorage(key: Uint8Array, secret: Uint8Array): Promise<{ ciphertext: string; iv: string }> {
+    const encoder = new TextEncoder();
     const iv = crypto.getRandomValues(new Uint8Array(12));
 
     const cryptoKey = await crypto.subtle.importKey(
@@ -258,14 +259,11 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
       key.buffer as ArrayBuffer
     );
 
-    // Convert to base64 - store full encrypted data including auth tag
     const encryptedArray = new Uint8Array(encrypted);
-    const ciphertext = btoa(String.fromCharCode(...encryptedArray));
-    const ivBase64 = btoa(String.fromCharCode(...iv));
 
     return {
-      ciphertext,
-      iv: ivBase64
+      ciphertext: btoa(String.fromCharCode(...encryptedArray.slice(0, -16))),
+      iv: btoa(String.fromCharCode(...iv))
     };
   }
 
@@ -274,6 +272,8 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
    */
   async function decryptKeyFromStorage(encrypted: { ciphertext: string; iv: string }, secret: Uint8Array): Promise<Uint8Array | null> {
     try {
+      const decoder = new TextDecoder();
+      
       const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.charCodeAt(0));
       const ciphertext = Uint8Array.from(atob(encrypted.ciphertext), (c) => c.charCodeAt(0));
 
@@ -301,7 +301,6 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
   /**
    * Ensure encryption key is available
    * If key is not in memory, try to decrypt the stored backup using device secret
-   * If backup decryption fails and PIN is set, attempt to re-derive from PIN
    * Throws if no key is available
    */
   async function ensureEncryptionKey(): Promise<void> {
@@ -313,7 +312,6 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
     // Try to load the encrypted key backup
     const keyStored = localStorage.getItem(KEY_STORAGE_KEY);
     if (!keyStored) {
-      // No stored key backup - need to derive from PIN or generate new
       throw new Error('[Security] No encryption key available. Please enter your PIN.');
     }
 
@@ -327,75 +325,18 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
 
       const decryptedKey = await decryptKeyFromStorage(encryptedKey, deviceSecret);
       
-      if (decryptedKey) {
-        // Successfully decrypted - load into memory
-        encryptionKey.value = decryptedKey;
-        isUnlocked.value = true;
-        console.log('[Security] Encryption key loaded from storage');
-        return;
+      if (!decryptedKey) {
+        throw new Error('[Security] Failed to decrypt stored key');
       }
-      
-      // Decryption failed - key backup may be corrupted or device secret changed
-      console.warn('[Security] Failed to decrypt key backup - will attempt PIN re-derivation');
-      
-      // Check if user has a PIN set
-      const authStore = useAuthStore();
-      if (authStore.isPinSet) {
-        // Will throw specific error to indicate PIN is needed
-        throw new Error('[Security] Key backup corrupted. Please enter your PIN to re-derive encryption key.');
-      }
-      
-      // No PIN set - need to generate new key
-      throw new Error('[Security] No valid encryption key. Please set up a PIN.');
-      
+
+      // Load key into memory
+      encryptionKey.value = decryptedKey;
+      isUnlocked.value = true;
+      console.log('[Security] Encryption key loaded from storage');
     } catch (error) {
       console.error('[Security] Failed to ensure encryption key:', error);
       throw new Error('[Security] Cannot access encrypted data. Please enter your PIN.');
     }
-  }
-
-  /**
-   * Unlock with PIN - re-derive encryption key from user's PIN
-   * This is used when the key backup cannot be decrypted (e.g., device secret changed)
-   * @param pin - User's PIN
-   */
-  async function unlockWithPin(pin: string): Promise<boolean> {
-    const authStore = useAuthStore();
-    
-    // First verify the PIN with auth store
-    const pinValid = await authStore.verifyPin(pin);
-    if (!pinValid) {
-      console.error('[Security] PIN verification failed');
-      return false;
-    }
-    
-    // Derive key from PIN
-    const derived = await deriveKeyFromPin(pin);
-    if (!derived) {
-      console.error('[Security] Failed to derive key from PIN');
-      return false;
-    }
-    
-    // Re-encrypt and backup the key with current device secret
-    if (encryptionKey.value) {
-      const deviceSecret = await getDeviceSecret();
-      if (deviceSecret) {
-        const encryptedKey = await encryptKeyForStorage(encryptionKey.value, deviceSecret);
-        localStorage.setItem(KEY_STORAGE_KEY, JSON.stringify(encryptedKey));
-        console.log('[Security] Key backup re-encrypted with new device secret');
-      }
-    }
-    
-    isUnlocked.value = true;
-    return true;
-  }
-
-  /**
-   * Check if we need PIN to unlock (key not in memory, backup may be corrupted)
-   */
-  function needsPinToUnlock(): boolean {
-    const authStore = useAuthStore();
-    return authStore.isPinSet && !encryptionKey.value;
   }
 
   /**
@@ -563,17 +504,12 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
     generateKey,
     deriveKeyFromPin,
     getDeviceSecret,
-    encryptKeyForStorage,
-    decryptKeyFromStorage,
-    ensureEncryptionKey,
     bindDevice,
     verifyDeviceBinding,
     createEncryptedTestRecord,
     verifyEncryptedTestRecord,
     lock,
     factoryReset,
-    getKeyInfo,
-    unlockWithPin,
-    needsPinToUnlock
+    getKeyInfo
   };
 });

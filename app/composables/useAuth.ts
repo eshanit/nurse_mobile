@@ -18,6 +18,7 @@ export function useAuth() {
   const currentPin = ref('');
   const confirmPin = ref('');
   const isConfirmingPin = ref(false);
+  const isSettingUpName = ref(false);
 
   // Computed
   const isAuthenticated = computed(() => authStore.isAuthenticated);
@@ -26,6 +27,8 @@ export function useAuth() {
   const remainingLockoutTime = computed(() => authStore.remainingLockoutTime);
   const failedAttempts = computed(() => authStore.failedAttempts);
   const maxFailedAttempts = 5;
+  // Get nurseName from store (uses VueUse useLocalStorage for persistence)
+  const nurseName = computed(() => authStore.nurseName);
 
   // Initialize on mount
   async function initialize() {
@@ -39,6 +42,35 @@ export function useAuth() {
     } finally {
       isLoading.value = false;
     }
+  }
+
+  /**
+   * Set the nurse's name and proceed to PIN setup
+   */
+  async function setNurseNameAndProceed(name: string): Promise<boolean> {
+    errorMessage.value = null;
+    
+    if (!name.trim()) {
+      errorMessage.value = 'Please enter your name';
+      return false;
+    }
+    
+    if (name.trim().length < 2) {
+      errorMessage.value = 'Name must be at least 2 characters';
+      return false;
+    }
+    
+    authStore.setNurseName(name.trim());
+    isSettingUpName.value = false;
+    return true;
+  }
+
+  /**
+   * Start PIN setup (from name entry)
+   */
+  function startPinSetup() {
+    isSettingUpName.value = false;
+    resetPinEntry();
   }
 
   /**
@@ -124,6 +156,13 @@ export function useAuth() {
   }
 
   /**
+   * Check if we need to show name entry
+   */
+  function showNameEntry(): boolean {
+    return !authStore.isPinSet && !authStore.getNurseName();
+  }
+
+  /**
    * Check if 4 digits entered and handle accordingly
    */
   function checkPinEntryComplete() {
@@ -206,6 +245,8 @@ export function useAuth() {
     currentPin,
     confirmPin,
     isConfirmingPin,
+    nurseName,
+    isSettingUpName,
 
     // Computed
     isAuthenticated,
@@ -217,6 +258,8 @@ export function useAuth() {
 
     // Actions
     initialize,
+    setNurseNameAndProceed,
+    startPinSetup,
     setupPin,
     verifyPin,
     addPinDigit,
@@ -225,6 +268,7 @@ export function useAuth() {
     getPinEntryMode,
     checkPinEntryComplete,
     resetPinEntry,
+    showNameEntry,
     logout,
     factoryReset,
     getAuditLogs

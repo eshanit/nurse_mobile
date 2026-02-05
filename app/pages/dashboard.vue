@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, computed, onUnmounted, ref } from 'vue';
+import { onMounted, computed, onUnmounted, ref, h } from 'vue';
+import { formatDistanceToNow, format } from 'date-fns';
 import { useAuth } from '@/composables/useAuth';
 import { useSecurityStore } from '@/stores/security';
 import { useDashboardStore, type DashboardState } from '@/stores/dashboard';
@@ -8,8 +9,54 @@ const auth = useAuth();
 const securityStore = useSecurityStore();
 const dashboardStore = useDashboardStore();
 
+// ----- PIN Entry State -----
+const showPinModal = ref(false);
+const pinEntry = ref('');
+const pinError = ref('');
+const isVerifyingPin = ref(false);
+const pinEntryError = ref<boolean>(false);
+
+// ----- Icon Component Mapping -----
+const iconComponents: Record<string, any> = {
+  'i-heroicons-lock-closed': {
+    render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' })
+    ])
+  },
+  'i-heroicons-key': {
+    render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z' })
+    ])
+  },
+  'i-heroicons-check-circle': {
+    render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' })
+    ])
+  },
+  'i-heroicons-wifi-slash': {
+    render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3m8.293 8.293l1.414 1.414' })
+    ])
+  },
+  'i-heroicons-arrow-path': {
+    render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5 animate-spin', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' })
+    ])
+  },
+  'i-heroicons-exclamation-circle': {
+    render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' })
+    ])
+  }
+};
+
+function getHeaderBadgeIcon(iconName: string) {
+  return iconComponents[iconName] || null;
+}
+
 // ----- Auth & Security -----
 const isAuthenticated = computed(() => auth.isAuthenticated.value);
+const nurseName = computed(() => auth.nurseName.value || 'Nurse');
 
 // ----- State Machine UI Bindings -----
 const currentState = computed(() => dashboardStore.state);
@@ -61,6 +108,15 @@ function handleOffline() {
 // ----- Security Actions -----
 async function verifyTestRecord() {
   testRecordStatus.value = 'pending';
+  
+  // Check if we need PIN to unlock
+  if (securityStore.needsPinToUnlock()) {
+    showPinModal.value = true;
+    pinEntryError.value = true; // Show error state
+    testRecordStatus.value = 'failed';
+    return;
+  }
+  
   try {
     const isValid = await securityStore.verifyEncryptedTestRecord();
     if (isValid) {
@@ -76,7 +132,14 @@ async function verifyTestRecord() {
     } else {
       testRecordStatus.value = 'not_created';
     }
-  } catch {
+  } catch (error) {
+    console.error('[Dashboard] Test record verification failed:', error);
+    
+    // Check if PIN is needed after failure
+    if (securityStore.needsPinToUnlock()) {
+      showPinModal.value = true;
+      pinEntryError.value = true;
+    }
     testRecordStatus.value = 'failed';
   }
 }
@@ -88,6 +151,52 @@ async function createTestRecord() {
     await verifyTestRecord();
   } finally {
     isCreatingTestRecord.value = false;
+  }
+}
+
+// ----- PIN Entry Actions -----
+function closePinModal() {
+  showPinModal.value = false;
+  pinEntry.value = '';
+  pinError.value = '';
+  pinEntryError.value = false;
+}
+
+async function submitPin() {
+  if (pinEntry.value.length !== 4 || isVerifyingPin.value) {
+    return;
+  }
+  
+  isVerifyingPin.value = true;
+  pinError.value = '';
+  
+  try {
+    const unlocked = await securityStore.unlockWithPin(pinEntry.value);
+    if (unlocked) {
+      closePinModal();
+      // Retry verification after successful unlock
+      await verifyTestRecord();
+    } else {
+      pinError.value = 'Invalid PIN';
+      pinEntry.value = '';
+    }
+  } catch (error) {
+    console.error('[Dashboard] PIN unlock failed:', error);
+    pinError.value = 'Failed to unlock. Please try again.';
+  } finally {
+    isVerifyingPin.value = false;
+  }
+}
+
+function handlePinInput(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const value = input.value.replace(/\D/g, '').slice(0, 4);
+  pinEntry.value = value;
+  input.value = value;
+  
+  // Auto-submit when 4 digits entered
+  if (value.length === 4) {
+    submitPin();
   }
 }
 
@@ -129,6 +238,10 @@ function handleNewAssessment() {
   }
 }
 
+function handleViewRecords(filter: string) {
+  navigateTo(`/records?filter=${filter}`);
+}
+
 function handleSync() {
   if (dashboardStore.isReady || dashboardStore.isOffline) {
     dashboardStore.transitionToSyncing();
@@ -145,12 +258,22 @@ function handleResumeDraft() {
   }
 }
 
-function formatTime(timestamp: string): string {
-  return new Date(timestamp).toLocaleTimeString();
+function formatTimeAgo(timestamp: string | undefined): string {
+  if (!timestamp) return 'Unknown';
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return 'Unknown';
+  
+  // Use date-fns for relative time formatting
+  return formatDistanceToNow(date, { addSuffix: true });
 }
 
-function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString();
+function formatDate(date: string | undefined): string {
+  if (!date) return 'Invalid Date';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return 'Invalid Date';
+  
+  // Use date-fns for date formatting
+  return format(d, 'MMM d, yyyy');
 }
 
 // State indicator helper
@@ -202,12 +325,12 @@ function getStateColor(state: DashboardState): string {
     <header class="flex items-center justify-between mb-6">
       <div>
         <h1 class="text-2xl font-bold text-white">HealthBridge</h1>
-        <p class="text-gray-400 text-sm">Nurse Companion</p>
+        <p class="text-gray-400 text-sm">Welcome, {{ nurseName }}</p>
       </div>
       
       <!-- State Badge -->
       <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-full">
-        <span class="text-lg">{{ headerBadge.icon }}</span>
+        <component :is="getHeaderBadgeIcon(headerBadge.icon)" v-if="getHeaderBadgeIcon(headerBadge.icon)" class="text-lg" :class="{ 'animate-spin': headerBadge.icon === 'i-heroicons-arrow-path' }"></component>
         <span class="text-gray-300 text-sm font-medium">{{ headerBadge.text }}</span>
       </div>
       
@@ -270,6 +393,7 @@ function getStateColor(state: DashboardState): string {
         <div 
           class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
           :class="{ 'ring-2 ring-red-500': stats.red > 0 }"
+          @click="handleViewRecords('urgent')"
         >
           <div class="flex items-center justify-between mb-2">
             <span class="text-red-400 text-xs font-medium uppercase tracking-wide">Urgent</span>
@@ -279,7 +403,11 @@ function getStateColor(state: DashboardState): string {
         </div>
 
         <!-- Needs Attention/Yellow -->
-        <div class="bg-gray-800 rounded-xl p-4">
+        <div 
+          class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
+          :class="{ 'ring-2 ring-yellow-500': stats.yellow > 0 }"
+          @click="handleViewRecords('attention')"
+        >
           <div class="flex items-center justify-between mb-2">
             <span class="text-yellow-400 text-xs font-medium uppercase tracking-wide">Attention</span>
             <div :class="yellowStatsClass" class="w-3 h-3 rounded-full"></div>
@@ -288,7 +416,11 @@ function getStateColor(state: DashboardState): string {
         </div>
 
         <!-- Stable/Green -->
-        <div class="bg-gray-800 rounded-xl p-4">
+        <div 
+          class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
+          :class="{ 'ring-2 ring-green-500': stats.green > 0 }"
+          @click="handleViewRecords('stable')"
+        >
           <div class="flex items-center justify-between mb-2">
             <span class="text-green-400 text-xs font-medium uppercase tracking-wide">Stable</span>
             <div :class="greenStatsClass" class="w-3 h-3 rounded-full"></div>
@@ -323,7 +455,11 @@ function getStateColor(state: DashboardState): string {
         </div>
 
         <!-- Awaiting Sync Card -->
-        <div v-if="awaitingSyncCount > 0" class="bg-gray-800 rounded-xl p-4">
+        <div 
+          v-if="awaitingSyncCount > 0" 
+          class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
+          @click="handleViewRecords('pending')"
+        >
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-full bg-yellow-900/50 flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -341,7 +477,11 @@ function getStateColor(state: DashboardState): string {
         </div>
 
         <!-- Urgent Items Card -->
-        <div v-if="urgentCount > 0" class="bg-gray-800 rounded-xl p-4 border border-red-500/30">
+        <div 
+          v-if="urgentCount > 0" 
+          class="bg-gray-800 rounded-xl p-4 border border-red-500/30 cursor-pointer hover:bg-gray-750 transition-colors"
+          @click="handleViewRecords('urgent')"
+        >
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-full bg-red-900/50 flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -435,7 +575,7 @@ function getStateColor(state: DashboardState): string {
               </div>
             </div>
             <div class="text-right">
-              <p class="text-gray-400 text-xs">{{ formatTime(item.updated_at) }}</p>
+              <p class="text-gray-400 text-xs">{{ formatTimeAgo(item.updated_at) }}</p>
               <p v-if="!item.synced" class="text-yellow-500 text-xs">Pending</p>
             </div>
           </div>
@@ -458,6 +598,67 @@ function getStateColor(state: DashboardState): string {
       </svg>
       <p class="text-white text-lg">Dashboard Locked</p>
       <p class="text-gray-500 text-sm">Please enter your PIN to continue</p>
+    </div>
+
+    <!-- PIN Entry Modal -->
+    <div v-if="showPinModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div class="bg-gray-800 rounded-xl p-6 max-w-sm w-full mx-4">
+        <div class="text-center mb-6">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-yellow-500 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          <h3 class="text-xl font-semibold text-white mb-2">
+            {{ pinEntryError ? 'Re-encrypting Data' : 'Enter PIN' }}
+          </h3>
+          <p class="text-gray-400 text-sm">
+            {{ pinEntryError ? 'Your encryption key needs to be re-derived. Enter your PIN to continue.' : 'Enter your 4-digit PIN to unlock the encryption key.' }}
+          </p>
+        </div>
+
+        <!-- PIN Input -->
+        <div class="mb-4">
+          <input
+            type="text"
+            inputmode="numeric"
+            maxlength="4"
+            :value="pinEntry"
+            @input="handlePinInput"
+            :disabled="isVerifyingPin"
+            placeholder="••••"
+            class="w-full text-center text-3xl tracking-widest py-3 bg-gray-700 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+            :class="{ 'border-red-500 focus:ring-red-500': pinError }"
+          />
+          <p v-if="pinError" class="text-red-500 text-sm text-center mt-2">{{ pinError }}</p>
+        </div>
+
+        <!-- PIN Dots -->
+        <div class="flex justify-center gap-3 mb-6">
+          <div 
+            v-for="i in 4" 
+            :key="i"
+            class="w-4 h-4 rounded-full transition-colors duration-200"
+            :class="i <= pinEntry.length ? 'bg-blue-500' : 'bg-gray-600'"
+          ></div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex gap-3">
+          <button 
+            @click="closePinModal"
+            :disabled="isVerifyingPin"
+            class="flex-1 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white rounded-lg font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="submitPin"
+            :disabled="pinEntry.length !== 4 || isVerifyingPin"
+            class="flex-1 py-3 bg-blue-700 hover:bg-blue-600 disabled:bg-blue-800 text-white rounded-lg font-medium transition-colors"
+          >
+            {{ isVerifyingPin ? 'Verifying...' : 'Unlock' }}
+          </button>
+        </div>
+      </div>
     </div>
 
   </div>

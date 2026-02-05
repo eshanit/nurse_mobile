@@ -27,6 +27,7 @@ import {
   secureAllDocs,
   type BulkResult
 } from './secureDb';
+import { useSecurityStore } from '~/stores/security';
 
 // ============================================
 // DEPRECATED - These functions are no longer used
@@ -118,71 +119,76 @@ export class PouchDBService {
   private initialized = false;
 
   /**
-   * @deprecated Use initializeSecureDb() from secureDb instead
+   * @deprecated Use initializeSecureDb() from secureDb instead (now requires encryptionKey parameter)
    */
-  async initialize(passphrase?: string): Promise<void> {
+  async initialize(passphrase?: string, encryptionKey?: Uint8Array): Promise<void> {
     console.warn('[PouchDB] PouchDBService.initialize() is deprecated. Use initializeSecureDb() from secureDb instead.');
     
     if (!this.initialized) {
-      await initializeSecureDb();
+      if (!encryptionKey) {
+        throw new Error('[PouchDB] Encryption key is required to initialize the database');
+      }
+      await initializeSecureDb(encryptionKey);
       this.initialized = true;
       console.log('[PouchDB] Database initialized via secureDb');
     }
   }
 
   /**
-   * @deprecated Use securePut() from secureDb instead
+   * @deprecated Use securePut() from secureDb instead (now requires encryptionKey parameter)
    */
   async put<T extends { _id: string; _rev?: string }>(
-    doc: T
+    doc: T,
+    encryptionKey: Uint8Array
   ): Promise<{ id: string; rev: string; ok: boolean }> {
     console.warn('[PouchDB] put() is deprecated. Use securePut() from secureDb instead.');
-    const result = await securePut(doc);
+    const result = await securePut(doc, encryptionKey);
     return { id: result.id, rev: result.rev, ok: true };
   }
 
   /**
-   * @deprecated Use secureGet() from secureDb instead
+   * @deprecated Use secureGet() from secureDb instead (now requires encryptionKey parameter)
    */
-  async get<T>(id: string): Promise<T | null> {
+  async get<T>(id: string, encryptionKey: Uint8Array): Promise<T | null> {
     console.warn('[PouchDB] get() is deprecated. Use secureGet() from secureDb instead.');
-    return secureGet<T>(id);
+    return secureGet<T>(id, encryptionKey);
   }
 
   /**
-   * @deprecated Use secureFind() from secureDb instead
+   * @deprecated Use secureFind() from secureDb instead (now requires encryptionKey parameter)
    */
-  async find<T>(selector: Record<string, unknown>): Promise<T[]> {
+  async find<T>(selector: Record<string, unknown>, encryptionKey: Uint8Array): Promise<T[]> {
     console.warn('[PouchDB] find() is deprecated. Use secureFind() from secureDb instead.');
-    return secureFind<T>(selector);
+    return secureFind<T>(selector, encryptionKey);
   }
 
   /**
-   * @deprecated Use secureDelete() from secureDb instead
+   * @deprecated Use secureDelete() from secureDb instead (now requires encryptionKey parameter)
    */
   async delete(
     id: string,
-    rev: string
+    rev: string,
+    encryptionKey: Uint8Array
   ): Promise<{ id: string; rev: string; ok: boolean }> {
     console.warn('[PouchDB] delete() is deprecated. Use secureDelete() from secureDb instead.');
-    const result = await secureDelete(id, rev);
+    const result = await secureDelete(id, rev, encryptionKey);
     return { id: result.id, rev: rev, ok: result.ok };
   }
 
   /**
-   * @deprecated Use secureAllDocs() from secureDb instead
+   * @deprecated Use secureAllDocs() from secureDb instead (now requires encryptionKey parameter)
    */
-  async allDocs<T extends { _id: string; _rev?: string }>(): Promise<T[]> {
+  async allDocs<T extends { _id: string; _rev?: string }>(encryptionKey: Uint8Array): Promise<T[]> {
     console.warn('[PouchDB] allDocs() is deprecated. Use secureAllDocs() from secureDb instead.');
-    return secureAllDocs<T>();
+    return secureAllDocs<T>(encryptionKey);
   }
 
   /**
-   * @deprecated Use secureInfo() from secureDb instead
+   * @deprecated Use secureInfo() from secureDb instead (now requires encryptionKey parameter)
    */
-  async info(): Promise<{ db_name: string; doc_count: number; update_seq: number }> {
+  async info(encryptionKey: Uint8Array): Promise<{ db_name: string; doc_count: number; update_seq: number }> {
     console.warn('[PouchDB] info() is deprecated. Use secureInfo() from secureDb instead.');
-    const info = await secureInfo();
+    const info = await secureInfo(encryptionKey);
     return { 
       db_name: info.dbName, 
       doc_count: info.docCount, 
@@ -191,33 +197,35 @@ export class PouchDBService {
   }
 
   /**
-   * @deprecated Use secureBulkDocs() from secureDb instead
+   * @deprecated Use secureBulkDocs() from secureDb instead (now requires encryptionKey parameter)
    */
   async bulkDocs<T extends { _id: string; _rev?: string }>(
-    docs: T[]
+    docs: T[],
+    encryptionKey: Uint8Array
   ): Promise<BulkResult[]> {
     console.warn('[PouchDB] bulkDocs() is deprecated. Use secureBulkDocs() from secureDb instead.');
-    return secureBulkDocs(docs);
+    return secureBulkDocs(docs, encryptionKey);
   }
 
   /**
-   * @deprecated Use secureCreateIndex() from secureDb instead
+   * @deprecated Use secureCreateIndex() from secureDb instead (now requires encryptionKey parameter)
    */
-  async createIndexes(): Promise<void> {
+  async createIndexes(encryptionKey: Uint8Array): Promise<void> {
     console.warn('[PouchDB] createIndexes() is deprecated. Use secureCreateIndex() from secureDb instead.');
-    await secureCreateIndex(['type', 'createdAt']);
-    await secureCreateIndex(['_id']);
+    await secureCreateIndex(['type', 'createdAt'], encryptionKey);
+    await secureCreateIndex(['_id'], encryptionKey);
   }
 
   /**
-   * @deprecated Use secureCreateDesignDoc() from secureDb instead
+   * @deprecated Use secureCreateDesignDoc() from secureDb instead (now requires encryptionKey parameter)
    */
   async createDesignDoc(
     designDocId: string,
-    views: Record<string, { map: string; reduce?: string }>
+    views: Record<string, { map: string; reduce?: string }>,
+    encryptionKey: Uint8Array
   ): Promise<void> {
     console.warn('[PouchDB] createDesignDoc() is deprecated. Use secureCreateDesignDoc() from secureDb instead.');
-    await secureCreateDesignDoc(designDocId, views);
+    await secureCreateDesignDoc(designDocId, views, encryptionKey);
   }
 
   /**

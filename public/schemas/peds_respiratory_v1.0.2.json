@@ -11,7 +11,7 @@
   "estimatedCompletionMinutes": 10,
   "workflow": [
     {
-      "id": "welcome",
+      "id": "patient_info",
       "name": "Patient Information",
       "clinicalStep": 1,
       "allowedTransitions": ["danger_signs"]
@@ -20,36 +20,42 @@
       "id": "danger_signs",
       "name": "Danger Signs Assessment",
       "clinicalStep": 2,
-      "allowedTransitions": ["vitals", "welcome"],
-      "requiredFields": [
-        "unable_to_drink",
-        "vomits_everything",
-        "convulsions",
-        "lethargic_unconscious"
-      ]
+      "allowedTransitions": ["respiratory_danger", "patient_info"]
+    },
+    {
+      "id": "respiratory_danger",
+      "name": "Respiratory Danger Signs",
+      "clinicalStep": 3,
+      "allowedTransitions": ["vitals", "danger_signs"]
     },
     {
       "id": "vitals",
       "name": "Vital Signs",
-      "clinicalStep": 3,
-      "allowedTransitions": ["assessment", "danger_signs"]
+      "clinicalStep": 4,
+      "allowedTransitions": ["assessment", "respiratory_danger"]
     },
     {
       "id": "assessment",
       "name": "Respiratory Assessment",
-      "clinicalStep": 4,
-      "allowedTransitions": ["triage", "vitals"]
+      "clinicalStep": 5,
+      "allowedTransitions": ["symptoms", "vitals"]
+    },
+    {
+      "id": "symptoms",
+      "name": "Other Symptoms",
+      "clinicalStep": 6,
+      "allowedTransitions": ["triage", "assessment"]
     },
     {
       "id": "triage",
       "name": "Triage & Classification",
-      "clinicalStep": 5,
-      "allowedTransitions": ["assessment", "complete"]
+      "clinicalStep": 7,
+      "allowedTransitions": ["symptoms", "complete"]
     },
     {
       "id": "complete",
       "name": "Complete",
-      "clinicalStep": 6,
+      "clinicalStep": 8,
       "allowedTransitions": []
     }
   ],
@@ -59,7 +65,7 @@
       "title": "Patient Information",
       "description": "Basic patient demographics",
       "icon": "👶",
-      "fields": ["patient_name", "patient_age_months", "patient_weight_kg"]
+      "fields": ["patient_id", "patient_name", "patient_age_months", "patient_weight_kg"]
     },
     {
       "id": "danger_signs",
@@ -119,9 +125,22 @@
         "fever_present",
         "runny_nose"
       ]
+    },
+    {
+      "id": "triage",
+      "title": "Triage & Classification",
+      "description": "Classification based on assessment findings",
+      "fields": []
     }
   ],
   "fields": [
+    {
+      "id": "patient_id",
+      "type": "text",
+      "label": "Patient ID",
+      "required": false,
+      "placeholder": "Enter patient ID (optional)"
+    },
     {
       "id": "patient_name",
       "type": "text",
@@ -147,8 +166,8 @@
       "label": "Weight (kg)",
       "required": true,
       "config": {
-        "min": 2,
-        "max": 30,
+        "min": 1,
+        "max": 99.9,
         "step": 0.1
       }
     },

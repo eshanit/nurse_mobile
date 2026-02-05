@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue';
+import { onMounted, ref, computed, watch } from 'vue';
 import { useAuth } from '~/composables/useAuth';
 
 const {
@@ -12,6 +12,9 @@ const {
   remainingLockoutTime,
   failedAttempts,
   maxFailedAttempts,
+  nurseName,
+  showNameEntry,
+  setNurseNameAndProceed,
   initialize,
   setupPin,
   verifyPin,
@@ -29,10 +32,32 @@ const {
 // Navigation
 const router = useRouter();
 
+// Local state for name input
+const nameInput = ref('');
+const nameInputRef = ref<HTMLInputElement | null>(null);
+
+// Focus name input when shown
+watch(showNameEntry, (show) => {
+  if (show) {
+    setTimeout(() => {
+      nameInputRef.value?.focus();
+    }, 100);
+  }
+});
+
 // Initialize on mount
 onMounted(async () => {
   await initialize();
 });
+
+// Handle name submission
+async function handleNameSubmit() {
+  const success = await setNurseNameAndProceed(nameInput.value);
+  if (success) {
+    // Clear and focus PIN input
+    nameInput.value = '';
+  }
+}
 
 // Handle number pad press
 function handleNumberPress(num: number) {
@@ -121,6 +146,59 @@ watch(isAuthenticated, (value) => {
         </svg>
         <h2 class="text-xl font-bold text-red-400">Too Many Attempts</h2>
         <p class="text-gray-300 mt-2">{{ pageSubtitle }}</p>
+      </div>
+
+      <!-- Nurse Name Entry (First Time Setup) -->
+      <div v-else-if="showNameEntry()" class="bg-gray-800 rounded-xl p-6 shadow-xl">
+        <!-- Title -->
+        <div class="text-center mb-6">
+          <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-600 mb-3">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+          </div>
+          <h2 class="text-xl font-semibold text-white">Welcome, Nurse</h2>
+          <p class="text-gray-400 text-sm mt-1">Please enter your name to get started</p>
+        </div>
+
+        <!-- Error Message -->
+        <div v-if="errorMessage" class="bg-red-900/50 border border-red-700 rounded-lg p-3 mb-4">
+          <p class="text-red-400 text-sm text-center">{{ errorMessage }}</p>
+        </div>
+
+        <!-- Name Input -->
+        <div class="mb-6">
+          <label for="nurseName" class="block text-sm font-medium text-gray-300 mb-2">
+            Your Name
+          </label>
+          <input
+            ref="nameInputRef"
+            id="nurseName"
+            v-model="nameInput"
+            type="text"
+            placeholder="Enter your full name"
+            class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            @keyup.enter="handleNameSubmit"
+            maxlength="50"
+          />
+        </div>
+
+        <!-- Submit Button -->
+        <button
+          @click="handleNameSubmit"
+          :disabled="!nameInput.trim()"
+          class="w-full py-3 rounded-lg font-semibold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :class="nameInput.trim() ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-600'"
+        >
+          Continue
+        </button>
+
+        <!-- Info Note -->
+        <div class="mt-4 p-3 bg-blue-900/30 border border-blue-800 rounded-lg">
+          <p class="text-blue-300 text-xs text-center">
+            This name will be displayed on patient assessments you complete.
+          </p>
+        </div>
       </div>
 
       <!-- PIN Entry Form -->

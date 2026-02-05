@@ -1,9 +1,13 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.healthbridge.nurse',
+  appId: 'net.healthbridge.app',
   appName: 'HealthBridge',
-  webDir: 'dist'
+  webDir: '.output/public',
+  server: {
+    "androidScheme": "http",
+    "cleartext": true
+  }
 };
 
 export default config;

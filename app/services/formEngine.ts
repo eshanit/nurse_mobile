@@ -29,6 +29,7 @@ import type {
   TriageRule,
 } from '~/types/clinical-form';
 import { securePut, secureGet, secureAllDocs } from './secureDb';
+import { useSecurityStore } from '~/stores/security';
 import {
   calculateTriage,
   getWhoFastBreathingThreshold,
@@ -203,6 +204,9 @@ class ClinicalFormEngine {
       status: 'draft',
       patientId,
       answers,
+      calculated: {
+        triagePriority: 'green' // Default priority
+      },
       auditLog: [{
         timestamp: now,
         userId: initialData?.auditLog?.[0]?.userId || 'unknown',
@@ -233,8 +237,13 @@ class ClinicalFormEngine {
       return this.instances.get(formId)!;
     }
 
+    const security = useSecurityStore();
+    if (!security.encryptionKey) {
+      throw new Error('[SecureDB] Database locked: encryption key not available');
+    }
+
     // Load from secure storage
-    const instance = await secureGet<ClinicalFormInstance>(formId);
+    const instance = await secureGet<ClinicalFormInstance>(formId, security.encryptionKey);
     if (!instance) {
       throw new Error(`Form instance not found: ${formId}`);
     }
@@ -247,7 +256,12 @@ class ClinicalFormEngine {
    * Load all draft instances for a patient
    */
   async loadPatientForms(patientId: string): Promise<ClinicalFormInstance[]> {
-    const allDocs = await secureAllDocs<ClinicalFormInstance>();
+    const security = useSecurityStore();
+    if (!security.encryptionKey) {
+      throw new Error('[SecureDB] Database locked: encryption key not available');
+    }
+
+    const allDocs = await secureAllDocs<ClinicalFormInstance>(security.encryptionKey);
     return allDocs.filter((doc: ClinicalFormInstance) => doc.patientId === patientId && doc.status === 'draft');
   }
 
@@ -558,6 +572,14 @@ class ClinicalFormEngine {
     if (targetState.allowedTransitions.length === 0) {
       instance.status = 'completed';
       instance.completedAt = now;
+      instance.syncStatus = 'pending'; // Mark as needing sync
+      
+      // Run triage logic for final classification
+      const triageResult = await this.runTriageLogic(formId);
+      instance.calculated = {
+        ...instance.calculated,
+        triagePriority: triageResult.priority,
+      };
     }
 
     this.handleSpecGap(
@@ -842,8 +864,14 @@ class ClinicalFormEngine {
    * Save instance to secure storage
    */
   async saveInstance(instance: ClinicalFormInstance): Promise<void> {
+    const security = useSecurityStore();
+    
+    if (!security.encryptionKey) {
+      throw new Error('[SecureDB] Database locked: encryption key not available');
+    }
+    
     instance.syncStatus = 'pending';
-    await securePut(instance);
+    await securePut(instance, security.encryptionKey);
     this.instances.set(instance._id, instance);
 
     // Trigger sync if online
@@ -902,7 +930,12 @@ class ClinicalFormEngine {
    * Get pending forms for sync
    */
   async getPendingForms(): Promise<ClinicalFormInstance[]> {
-    const allDocs = await secureAllDocs<ClinicalFormInstance>();
+    const security = useSecurityStore();
+    if (!security.encryptionKey) {
+      throw new Error('[SecureDB] Database locked: encryption key not available');
+    }
+
+    const allDocs = await secureAllDocs<ClinicalFormInstance>(security.encryptionKey);
     return allDocs.filter((doc: ClinicalFormInstance) =>
       doc.syncStatus === 'pending' || doc.syncStatus === 'error'
     );

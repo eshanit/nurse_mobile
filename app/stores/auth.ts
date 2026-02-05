@@ -7,6 +7,7 @@
 
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { useLocalStorage } from '@vueuse/core';
 
 export interface AuthState {
   isAuthenticated: boolean;
@@ -14,6 +15,7 @@ export interface AuthState {
   failedAttempts: number;
   lockoutUntil: number | null;
   deviceId: string | null;
+  nurseName: string | null;
 }
 
 export interface AuditLogEntry {
@@ -30,6 +32,8 @@ export const useAuthStore = defineStore('auth', () => {
   const failedAttempts = ref(0);
   const lockoutUntil = ref<number | null>(null);
   const deviceId = ref<string | null>(null);
+  // Use VueUse's useLocalStorage for automatic persistence of nurse name
+  const nurseName = useLocalStorage<string | null>('healthbridge_nurse_name', null);
   const auditLogs = ref<AuditLogEntry[]>([]);
 
   // Constants
@@ -64,6 +68,9 @@ export const useAuthStore = defineStore('auth', () => {
     // Check if PIN is set
     isPinSet.value = localStorage.getItem('healthbridge_pin_hash') !== null;
 
+    // Load nurse name (now handled by useLocalStorage)
+    // nurseName.value is automatically synced with localStorage
+
     // Load lockout state
     const lockoutStored = localStorage.getItem('healthbridge_lockout_until');
     if (lockoutStored) {
@@ -96,6 +103,22 @@ export const useAuthStore = defineStore('auth', () => {
     const array = new Uint8Array(16);
     crypto.getRandomValues(array);
     return Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  /**
+   * Set the nurse's name
+   * @param name - Nurse's display name
+   */
+  function setNurseName(name: string): void {
+    nurseName.value = name.trim();
+    logAction('set_nurse_name', true, 'Nurse name set successfully');
+  }
+
+  /**
+   * Get the nurse's name
+   */
+  function getNurseName(): string | null {
+    return nurseName.value;
   }
 
   /**
@@ -294,6 +317,7 @@ export const useAuthStore = defineStore('auth', () => {
     failedAttempts,
     lockoutUntil,
     deviceId,
+    nurseName,
     auditLogs,
 
     // Computed
@@ -302,6 +326,8 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Actions
     initialize,
+    setNurseName,
+    getNurseName,
     setupPin,
     verifyPin,
     logout,
