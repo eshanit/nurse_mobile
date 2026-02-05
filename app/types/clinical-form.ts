@@ -282,6 +282,9 @@ export interface ClinicalFormInstance {
   patientAgeMonths?: number;
   patientName?: string;
   
+  // Session Link
+  sessionId?: string;
+  
   // Answers
   answers: Record<string, any>;
   

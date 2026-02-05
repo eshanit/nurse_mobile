@@ -971,6 +971,30 @@ class ClinicalFormEngine {
 
 
   /**
+   * Get or create a form instance linked to a session
+   */
+  async getOrCreateInstance(options: {
+    workflow: string;
+    sessionId: string;
+  }): Promise<ClinicalFormInstance> {
+    const { workflow, sessionId } = options;
+    
+    // Create a new instance with sessionId
+    const instance = await this.createInstance(
+      workflow,
+      sessionId // Using sessionId as patientId for now
+    );
+    
+    // Link the form to the session
+    if (!instance.sessionId) {
+      instance.sessionId = sessionId;
+      await this.saveInstance(instance);
+    }
+    
+    return instance;
+  }
+
+  /**
    * Clear schema cache (for testing or schema updates)
    */
   clearCache(): void {
