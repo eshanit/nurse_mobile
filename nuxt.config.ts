@@ -9,6 +9,7 @@ export default defineNuxtConfig({
     '@nuxtjs/i18n',
     'nuxt-zod-i18n',
     '@pinia/nuxt',
+    '@nuxtjs/color-mode',
   ],
   css: ['~/assets/css/main.css'],
   alias: {
@@ -24,4 +25,10 @@ export default defineNuxtConfig({
     vueI18n: './i18n.config.ts'
   },
   ssr: false,
+  colorMode: {
+    preference: 'dark',
+    fallback: 'dark',
+    dataValue: 'theme',
+    classSuffix: ''
+  }
 })

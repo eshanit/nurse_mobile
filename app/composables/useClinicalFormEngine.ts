@@ -12,6 +12,8 @@
 
 import { ref, computed, shallowRef, type Ref, type ComputedRef } from 'vue';
 import { formEngine } from '@/services/formEngine';
+import { updateSessionTriage } from '@/services/sessionEngine';
+import { bridgeAssessmentToTreatment } from '@/services/treatmentBridge';
 import type { 
   ClinicalFormSchema, 
   ClinicalFormInstance, 
@@ -25,8 +27,19 @@ import { getFieldSchema } from '~/schemas/clinical/fieldSchemas';
 interface UseClinicalFormEngineOptions {
   /** Schema ID to load from form engine */
   schemaId: string;
+  /** Form instance ID to load existing instance (optional) */
+  formId?: string;
   /** Zod schema for field validation */
   zodSchema?: z.ZodType<unknown>;
+  /** Optional session ID to associate with the form */
+  sessionId?: string;
+  /** Optional patient data to pre-populate (from session) */
+  patientData?: {
+    patientId?: string;
+    patientName?: string;
+    dateOfBirth?: string;
+    gender?: string;
+  };
   /** Optional custom save handler */
   onSave?: (fieldId: string, value: unknown, instance: ClinicalFormInstance) => Promise<void>;
 }
@@ -71,8 +84,17 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
   
   // Computed
   const currentSection = computed(() => {
-    if (!schema.value?.sections || !instance.value) return undefined;
-    return schema.value.sections[currentSectionIndex.value];
+    if (!schema.value?.sections || !instance.value) {
+      console.log('[useClinicalFormEngine] currentSection: schema or instance missing');
+      return undefined;
+    }
+    const section = schema.value.sections[currentSectionIndex.value];
+    console.log('[useClinicalFormEngine] currentSection:', {
+      index: currentSectionIndex.value,
+      sectionId: section?.id,
+      totalSections: schema.value.sections.length
+    });
+    return section;
   });
   
   const progress = computed(() => {
@@ -103,15 +125,74 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
       const loadedSchema = await formEngine.loadSchema(options.schemaId);
       schema.value = loadedSchema;
       
-      // Create new instance
-      const newInstance = await formEngine.createInstance(
-        options.schemaId,
-        getUserId()
-      );
+      let newInstance: ClinicalFormInstance;
+      
+      // Check if we have an existing form ID to load
+      // Only load existing instance if formId is not 'new' or empty
+      if (options.formId && options.formId !== 'new') {
+        // Load existing instance
+        newInstance = await formEngine.loadInstance(options.formId);
+        console.log('[useClinicalFormEngine] Loaded existing instance:', newInstance._id);
+      } else {
+        // Create new instance
+        newInstance = await formEngine.createInstance(
+          options.schemaId,
+          getUserId()
+        );
+        
+        // Associate with session if provided
+        if (options.sessionId && newInstance) {
+          newInstance.sessionId = options.sessionId;
+        }
+        
+        // Pre-populate with patient data if provided (from session)
+        if (options.patientData && newInstance) {
+          // Map patient data to form answers
+          if (options.patientData.patientId) {
+            newInstance.patientId = options.patientData.patientId;
+            newInstance.answers.patient_id = options.patientData.patientId;
+          }
+          if (options.patientData.patientName) {
+            newInstance.patientName = options.patientData.patientName;
+            newInstance.answers.patient_name = options.patientData.patientName;
+          }
+          if (options.patientData.dateOfBirth) {
+            newInstance.answers.patient_dob = options.patientData.dateOfBirth;
+          }
+          if (options.patientData.gender) {
+            newInstance.answers.patient_gender = options.patientData.gender;
+          }
+          
+          console.log('[useClinicalFormEngine] Pre-populated patient data:', newInstance.answers);
+          
+          // Skip patient_info section when patient data is provided
+          // Find the next section (danger_signs typically follows patient_info)
+          if (schema.value?.sections && schema.value.sections.length > 1) {
+            const nextSectionIndex = schema.value.sections.findIndex((s: any) => s.id === 'danger_signs');
+            if (nextSectionIndex >= 0) {
+              newInstance.currentStateId = 'danger_signs';
+              currentSectionIndex.value = nextSectionIndex;
+              console.log('[useClinicalFormEngine] Skipped patient_info, starting at:', newInstance.currentStateId);
+            }
+          }
+          
+          // Save the instance with pre-populated data
+          await formEngine.saveInstance(newInstance);
+        }
+      }
+      
       instance.value = newInstance;
       
       // Initialize form state from instance answers
       formState.value = { ...newInstance.answers };
+      
+      // Set current section based on instance state
+      if (schema.value?.sections && instance.value?.currentStateId) {
+        const sectionIndex = schema.value.sections.findIndex((s: any) => s.id === instance.value?.currentStateId);
+        if (sectionIndex >= 0) {
+          currentSectionIndex.value = sectionIndex;
+        }
+      }
       
       console.log('[useClinicalFormEngine] Initialized successfully');
     } catch (error) {
@@ -230,19 +311,31 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
   
   // Navigate to next section
   async function nextSection(): Promise<void> {
-    if (!schema.value?.workflow || !instance.value) return;
+    if (!schema.value?.workflow || !instance.value) {
+      console.log('[useClinicalFormEngine] nextSection blocked: no schema or instance');
+      return;
+    }
     
     // Get the current workflow state
     const currentInstance = instance.value;
     const currentState = schema.value.workflow.find((s: any) => s.id === currentInstance.currentStateId);
-    if (!currentState || !currentState.allowedTransitions || currentState.allowedTransitions.length === 0) return;
+    if (!currentState || !currentState.allowedTransitions || currentState.allowedTransitions.length === 0) {
+      console.log('[useClinicalFormEngine] nextSection blocked: no valid current state');
+      return;
+    }
     
     // Get the next state ID from allowed transitions (first one)
     const nextStateId = currentState.allowedTransitions[0] as string;
+    console.log('[useClinicalFormEngine] Next state:', nextStateId);
     
     // Find the section index for the next state
     const nextSectionIndex = schema.value.sections.findIndex((s: any) => s.id === nextStateId);
-    if (nextSectionIndex === -1) return;
+    console.log('[useClinicalFormEngine] Next section index:', nextSectionIndex);
+    
+    if (nextSectionIndex === -1) {
+      console.log('[useClinicalFormEngine] nextSection blocked: state not in sections');
+      return;
+    }
     
     // Validate transition before proceeding
     const validation = await formEngine.validateTransition(
@@ -257,6 +350,11 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
     // Update the instance state
     currentInstance.currentStateId = nextStateId;
     currentSectionIndex.value = nextSectionIndex;
+    
+    // Force reactivity update
+    currentSectionIndex.value = nextSectionIndex + 0;
+    
+    console.log('[useClinicalFormEngine] Updated section index to:', currentSectionIndex.value);
   }
   
   // Navigate to previous section
@@ -282,7 +380,43 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
       );
       
       if (result.allowed) {
+        // Reload the instance to get updated calculated values
         instance.value = await formEngine.loadInstance(instance.value._id);
+        
+        // Update session triage if sessionId is available
+        if (options.sessionId && instance.value.calculated?.triagePriority) {
+          try {
+            await updateSessionTriage(
+              options.sessionId,
+              instance.value.calculated.triagePriority as 'red' | 'yellow' | 'green' | 'unknown'
+            );
+            console.log('[useClinicalFormEngine] Updated session triage:', instance.value.calculated.triagePriority);
+          } catch (triageError) {
+            console.error('[useClinicalFormEngine] Failed to update session triage:', triageError);
+            // Don't fail the form completion if triage update fails
+          }
+        }
+        
+        // Bridge assessment to treatment (populate treatment form with triage and actions)
+        if (options.sessionId && instance.value.calculated?.triagePriority) {
+          try {
+            const bridgeResult = await bridgeAssessmentToTreatment({
+              sessionId: options.sessionId,
+              assessmentInstance: instance.value
+            });
+            
+            if (!bridgeResult.success) {
+              console.warn('[useClinicalFormEngine] Treatment bridge failed:', bridgeResult.error);
+              // Don't fail form completion for bridge failure
+            } else {
+              console.log('[useClinicalFormEngine] Treatment form bridged successfully');
+            }
+          } catch (bridgeError) {
+            console.error('[useClinicalFormEngine] Treatment bridge error:', bridgeError);
+            // Don't fail form completion for bridge error
+          }
+        }
+        
         return { allowed: true };
       }
       

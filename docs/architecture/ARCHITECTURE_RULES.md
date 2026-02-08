@@ -494,6 +494,253 @@ Code is **APPROVED** when:
 
 ---
 
+## **8. DARK MODE COLOR SCHEME - MANDATORY**
+
+All UI components **MUST** use consistent dark mode color schemes with proper Tailwind CSS dark mode classes.
+
+### **Dark Mode Color Palette:**
+```
+Background:    bg-gray-900 (primary), bg-gray-800 (secondary), bg-gray-700 (tertiary)
+Text:          text-white (primary), text-gray-300 (secondary), text-gray-400 (tertiary)
+Borders:       border-gray-700 (default), border-gray-600 (hover)
+Accents:       text-blue-400, text-green-400, text-yellow-400, text-red-400
+```
+
+### **TWCard Dark Mode Pattern:**
+```vue
+<TWCard color="gray" variant="solid">
+  <div class="bg-gray-800 rounded-lg p-4">
+    <h3 class="text-white font-semibold">Title</h3>
+    <p class="text-gray-300">Content text</p>
+  </div>
+</TWCard>
+```
+
+### **TWAlert Dark Mode Pattern:**
+```vue
+<TWAlert color="info" variant="soft">
+  <p class="text-blue-300">Information message</p>
+</TWAlert>
+```
+
+### **Component Dark Mode Requirements:**
+- All components must use `dark:` prefix for dark mode variants
+- Text contrast must meet WCAG 2.1 AA standards (4.5:1 ratio)
+- Use semantic colors: `text-gray-300` for body, `text-white` for headings
+- Background colors should use opacity modifiers: `bg-gray-800/50` for depth
+
+---
+
+## **9. NAVIGATION PATTERNS - MANDATORY**
+
+Use `<NuxtLink>` for user-initiated navigation and `navigateTo` for programmatic navigation.
+
+### **Use `<NuxtLink>` for:**
+- Navigation links in templates
+- Menu items and navigation menus
+- Buttons that navigate to another page
+- Any visible link that users click to navigate
+
+### **Use `navigateTo()` for:**
+- Form submissions with conditional redirects
+- Authentication guards and middleware redirects
+- Event handlers that require programmatic control
+- Navigation after async operations complete
+- Conditional redirects based on application state
+
+### **`<NuxtLink>` Pattern (RECOMMENDED):**
+```vue
+<!-- Navigation button in template -->
+<TWButton to="/dashboard" icon="i-heroicons-home">Dashboard</TWButton>
+
+<!-- Direct NuxtLink in template -->
+<NuxtLink to="/sessions" class="text-blue-400 hover:text-blue-300">
+  View Sessions
+</NuxtLink>
+```
+
+### **`navigateTo()` Pattern (when required):**
+```typescript
+// After form submission
+async function handleSubmit() {
+  await saveForm();
+  navigateTo('/dashboard');
+}
+
+// Auth guard
+router.beforeEach((to) => {
+  if (to.path requiresAuth && !isAuthenticated.value) {
+    navigateTo('/login');
+  }
+});
+```
+
+### **TWButton Navigation Prop:**
+The `TWButton` component supports the `to` prop for NuxtLink navigation:
+```vue
+<TWButton to="/sessions" color="primary">View Sessions</TWButton>
+```
+
+---
+
+## **10. DATE-FNS USAGE - MANDATORY**
+
+All date formatting and manipulation **MUST** use the `date-fns` library for tree-shakable modularity.
+
+### **Import Pattern:**
+```typescript
+import { format, formatDistanceToNow, parseISO } from 'date-fns';
+```
+
+### **Common Formatting Patterns:**
+```typescript
+// Format date for display
+format(new Date(), 'MMM d, yyyy');  // "Feb 8, 2026"
+
+// Format with time
+format(new Date(), 'MMM d, yyyy h:mm a');  // "Feb 8, 2026 4:18 AM"
+
+// Relative time (best for activity feeds)
+formatDistanceToNow(parseISO(dateString), { addSuffix: true });  // "2 hours ago"
+
+// ISO date
+formatISO(new Date());  // "2026-02-08T09:18:00Z"
+```
+
+### **Forbidden Patterns:**
+```typescript
+// ❌ NEVER do this - manual date formatting
+new Date().toLocaleDateString();
+new Date().toISOString();
+Intl.DateTimeFormat().format(new Date());
+```
+
+### **Allowed Patterns:**
+```typescript
+// ✅ Use date-fns
+import { format } from 'date-fns';
+format(date, 'PPP');  // "Feb 8th, 2026"
+format(date, 'PPPP');  // "Saturday, February 8th, 2026"
+```
+
+---
+
+## **11. VUEUSE INTEGRATION - MANDATORY**
+
+Use `@vueuse/core` for reactive browser APIs and composable utilities.
+
+### **Commonly Used Composables:**
+```typescript
+// Clipboard access
+import { useClipboard } from '@vueuse/core';
+const { copy, copied } = useClipboard();
+
+// Dark mode detection
+import { useDark, usePreferredDark } from '@vueuse/core';
+const isDark = useDark();
+const prefersDark = usePreferredDark();
+
+// Local storage (reactive)
+import { useLocalStorage } from '@vueuse/core';
+const state = useLocalStorage('key', defaultValue);
+
+// Viewport tracking
+import { useWindowSize, useWindowScroll } from '@vueuse/core';
+const { width, height } = useWindowSize();
+
+// Debounced utilities
+import { useDebounceFn, useThrottleFn } from '@vueuse/core';
+const debouncedFn = useDebounceFn(() => { /* ... */ }, 300);
+
+// Online/offline status
+import { useOnline } from '@vueuse/core';
+const isOnline = useOnline();
+
+// Clipboard with reactivity
+import { useClipboard } from '@vueuse/core';
+const { copy, paste } = useClipboard();
+```
+
+### **Network Status Pattern:**
+```typescript
+import { useOnline, useNavigator } from '@vueuse/core';
+
+const isOnline = useOnline();
+
+// Watch for online/offline changes
+watch(isOnline, (online) => {
+  if (online) {
+    syncOfflineData();
+  }
+});
+```
+
+### **Local Storage Pattern (with encryption):**
+```typescript
+import { useLocalStorage } from '@vueuse/core';
+
+// For sensitive data, wrap with encryption
+const secureState = computed({
+  get: () => decrypt(useLocalStorage('secure-key').value),
+  set: (val) => useLocalStorage('secure-key', encrypt(val))
+});
+```
+
+### **Debounced Search Pattern:**
+```typescript
+import { useDebounceFn } from '@vueuse/core';
+
+const searchQuery = ref('');
+const searchResults = ref([]);
+
+const debouncedSearch = useDebounceFn(async (query) => {
+  searchResults.value = await performSearch(query);
+}, 300);
+
+watch(searchQuery, (query) => {
+  debouncedSearch(query);
+});
+```
+
+---
+
+## **12. DARK MODE IMPLEMENTATION**
+
+The app uses `@nuxtjs/color-mode` for dark mode management.
+
+### **Forcing Dark Mode:**
+```typescript
+// In components
+const colorMode = useColorMode();
+colorMode.preference = 'dark';  // Force dark mode
+```
+
+### **Tailwind Dark Mode Classes:**
+```vue
+<!-- Light mode: bg-white text-gray-900 -->
+<!-- Dark mode: bg-gray-900 text-white -->
+<div class="bg-white dark:bg-gray-900 text-gray-900 dark:text-white">
+  Content
+</div>
+```
+
+### **Color Scheme Variables:**
+```css
+:root {
+  --color-background: #ffffff;
+  --color-surface: #f3f4f6;
+  --color-text: #111827;
+}
+
+.dark {
+  --color-background: #030712;
+  --color-surface: #1f2937;
+  --color-text: #f9fafb;
+}
+```
+
+---
+
 **This document is the single source of truth for HealthBridge implementation.**  
 Any deviation requires explicit approval from the clinical lead and technical architect.
 

@@ -12,6 +12,7 @@ export type FieldType =
   | 'boolean'
   | 'radio'
   | 'select'
+  | 'multiselect'
   | 'checkbox'
   | 'timer'
   | 'calculated'

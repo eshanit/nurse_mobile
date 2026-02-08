@@ -46,6 +46,11 @@ export interface ClinicalSession {
   _rev?: string;
   id: string;
   patientId?: string;
+  patientName?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  chiefComplaint?: string;
+  notes?: string;
   triage: ClinicalSessionTriage;
   status: ClinicalSessionStatus;
   stage: ClinicalSessionStage;
@@ -413,6 +418,63 @@ export async function getSessionStats(): Promise<{
     yellow: sessions.filter(s => s.status === 'open' && s.triage === 'yellow').length,
     green: sessions.filter(s => s.status === 'open' && (s.triage === 'green' || s.triage === 'unknown')).length
   };
+}
+
+/**
+ * Update session with patient registration data
+ * @param sessionId - Session ID
+ * @param data - Registration data to update
+ */
+export async function updateSession(
+  sessionId: string,
+  data: {
+    patientId?: string;
+    patientName?: string;
+    dateOfBirth?: string;
+    gender?: string;
+    chiefComplaint?: string;
+    notes?: string;
+  }
+): Promise<void> {
+  const key = await getEncryptionKey();
+  
+  const session = await loadSession(sessionId);
+  if (!session) {
+    throw new Error(`[SessionEngine] Session not found: ${sessionId}`);
+  }
+  
+  // Update fields
+  if (data.patientId !== undefined) {
+    session.patientId = data.patientId;
+  }
+  if (data.patientName !== undefined) {
+    session.patientName = data.patientName;
+  }
+  if (data.dateOfBirth !== undefined) {
+    session.dateOfBirth = data.dateOfBirth;
+  }
+  if (data.gender !== undefined) {
+    session.gender = data.gender;
+  }
+  if (data.chiefComplaint !== undefined) {
+    session.chiefComplaint = data.chiefComplaint;
+  }
+  if (data.notes !== undefined) {
+    session.notes = data.notes;
+  }
+  
+  session.updatedAt = Date.now();
+  
+  // Save to secureDb
+  await securePut(session, key);
+  
+  // Update cache
+  const index = _sessions.value.findIndex(s => s.id === sessionId);
+  if (index >= 0) {
+    _sessions.value[index] = session;
+  }
+  
+  console.log('[SessionEngine] Updated session:', session.id);
 }
 
 /**

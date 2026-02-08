@@ -53,6 +53,11 @@ export interface ClinicalSession {
   _rev?: string;
   id: string;
   patientId?: string;
+  patientName?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  chiefComplaint?: string;
+  notes?: string;
   triage: ClinicalSessionTriage;
   status: ClinicalSessionStatus;
   stage: ClinicalSessionStage;

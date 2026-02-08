@@ -15,6 +15,7 @@ import {
   getEventTypeConfig,
   initializeTimeline 
 } from '~/services/clinicalTimeline';
+import { TWAlert, TWCard, TWIcon } from '~/components/ui';
 
 interface Props {
   sessionId: string;
@@ -73,11 +74,14 @@ async function loadTimeline() {
     isLoading.value = true;
     error.value = null;
     
+    console.log('[Timeline] Loading timeline for session:', props.sessionId);
+    
     // Ensure timeline service is initialized
     await initializeTimeline();
     
     // Load events
     events.value = await getTimeline(props.sessionId, props.limit);
+    console.log('[Timeline] Loaded events:', events.value.length);
   } catch (err) {
     console.error('Failed to load timeline:', err);
     error.value = err instanceof Error ? err.message : 'Failed to load timeline';
@@ -139,7 +143,7 @@ watch(() => props.sessionId, () => {
 </script>
 
 <template>
-  <div class="timeline">
+  <div class="timeline dark:bg-gray-900">
     <!-- Header -->
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
@@ -150,33 +154,34 @@ watch(() => props.sessionId, () => {
       </span>
     </div>
     
-    <!-- Error State -->
-    <UAlert
+<!-- Error State -->
+    <TWAlert
       v-if="error"
       color="error"
-      variant="subtle"
-      :close-button="{ icon: 'i-heroicons-x-mark', color: 'gray', variant: 'ghost' }"
+      variant="soft"
+      dismissible
       @close="error = null"
     >
       {{ error }}
-    </UAlert>
+    </TWAlert>
     
-    <!-- Loading State -->
+<!-- Loading State -->
     <div v-if="isLoading" class="flex items-center justify-center py-8">
-      <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin text-gray-400" />
-      <span class="ml-2 text-gray-500">Loading timeline...</span>
+      <TWIcon name="i-heroicons-arrow-path" size="sm" class="animate-spin text-gray-400" />
+      <span class="ml-2 text-gray-500 dark:text-gray-400">Loading timeline...</span>
     </div>
     
-    <!-- Empty State -->
-    <UCard
+<!-- Empty State -->
+    <TWCard
       v-else-if="isEmpty"
+      color="gray"
       class="text-center py-6"
     >
-      <UIcon name="i-heroicons-clock" class="w-10 h-10 mx-auto text-gray-400 mb-3" />
+      <TWIcon name="i-heroicons-clock" size="lg" class="mx-auto text-gray-400 mb-3" />
       <p class="text-gray-500 dark:text-gray-400">
         No timeline events yet
       </p>
-    </UCard>
+    </TWCard>
     
     <!-- Timeline -->
     <div v-else class="relative">
@@ -199,7 +204,7 @@ watch(() => props.sessionId, () => {
           <div class="space-y-3 pl-4">
             <template v-for="event in dateEvents" :key="event.id">
               <div class="relative flex gap-3">
-                <!-- Event Icon -->
+<!-- Event Icon -->
                 <div 
                   class="relative z-10 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
                   :class="{
@@ -212,15 +217,16 @@ watch(() => props.sessionId, () => {
                     'bg-gray-100 dark:bg-gray-800': getConfig(event.type).color === 'text-gray-500'
                   }"
                 >
-                  <UIcon
+                  <TWIcon
                     :name="getConfig(event.type).icon"
-                    :class="getConfig(event.type).color"
-                    class="w-4 h-4"
+                    :color="getConfig(event.type).color"
+                    size="sm"
                   />
                 </div>
                 
-                <!-- Event Content -->
-                <UCard
+<!-- Event Content -->
+                <TWCard
+                  color="gray"
                   class="flex-1"
                   :class="compact ? 'py-2 px-3' : ''"
                 >
@@ -231,7 +237,7 @@ watch(() => props.sessionId, () => {
                         <span class="font-medium text-gray-900 dark:text-white text-sm">
                           {{ getLabel(event.type) }}
                         </span>
-                        <span class="text-xs text-gray-400">
+                        <span class="text-xs text-gray-400 dark:text-gray-500">
                           {{ formatTime(event.timestamp) }}
                         </span>
                       </div>
@@ -242,22 +248,22 @@ watch(() => props.sessionId, () => {
                       </p>
                       
                       <!-- Actor -->
-                      <p v-if="!compact && event.data.actor" class="mt-1 text-xs text-gray-400">
+                      <p v-if="!compact && event.data.actor" class="mt-1 text-xs text-gray-400 dark:text-gray-500">
                         by {{ getActor(event) }}
                       </p>
                       
                       <!-- Additional Details -->
                       <div v-if="!compact && (event.data.formName || event.data.newValue)" class="mt-2">
-                        <div v-if="event.data.formName" class="text-xs text-gray-500">
+                        <div v-if="event.data.formName" class="text-xs text-gray-500 dark:text-gray-400">
                           Form: {{ event.data.formName }}
                         </div>
-                        <div v-if="event.data.newValue?.triage" class="text-xs text-gray-500">
+                        <div v-if="event.data.newValue?.triage" class="text-xs text-gray-500 dark:text-gray-400">
                           Triage: {{ event.data.newValue.triage }}
                         </div>
                       </div>
                     </div>
                   </div>
-                </UCard>
+</TWCard>
               </div>
             </template>
           </div>

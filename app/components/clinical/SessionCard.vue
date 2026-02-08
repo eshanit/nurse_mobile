@@ -10,6 +10,7 @@
 
 import { computed } from 'vue';
 import type { ClinicalSession, ClinicalSessionTriage, ClinicalSessionStage } from '~/services/sessionEngine';
+import { TWCard, TWBadge, TWIcon, TWButton } from '~/components/ui';
 
 interface Props {
   session: ClinicalSession;
@@ -149,8 +150,9 @@ function handleContinue() {
 </script>
 
 <template>
-  <UCard
-    class="cursor-pointer transition-all duration-200 hover:shadow-md dark:hover:shadow-lg bg-gray-800 dark:bg-gray-800"
+  <TWCard
+    color="gray"
+    class="cursor-pointer transition-all duration-200 hover:shadow-md dark:hover:shadow-lg"
     :class="[
       compact ? 'py-3 px-4' : 'py-4 px-6'
     ]"
@@ -160,14 +162,16 @@ function handleContinue() {
     <div class="flex items-start justify-between">
       <!-- Left: Triage Badge & Session Info -->
       <div class="flex items-center gap-3">
-        <!-- Triage Badge -->
-        <div
-          class="flex items-center gap-1 px-3 py-1 rounded-full font-bold text-sm"
-          :class="[triageConfig.bgClass, triageConfig.textClass]"
+<!-- Triage Badge -->
+        <TWBadge
+          :color="triageConfig.color === 'error' ? 'error' : triageConfig.color === 'warning' ? 'warning' : triageConfig.color === 'success' ? 'success' : 'neutral'"
+          variant="solid"
+          size="sm"
+          class="font-bold"
         >
-          <UIcon :name="triageConfig.icon" class="w-4 h-4" />
-          <span>{{ triageConfig.label }}</span>
-        </div>
+          <TWIcon :name="triageConfig.icon" size="xs" class="mr-1" />
+          {{ triageConfig.label }}
+        </TWBadge>
         
         <!-- Session Info -->
         <div v-if="!compact">
@@ -180,35 +184,35 @@ function handleContinue() {
         </div>
       </div>
       
-      <!-- Right: Stage Badge -->
-      <UBadge
-        :color="stageConfig.color"
-        variant="subtle"
+<!-- Right: Stage Badge -->
+      <TWBadge
+        :color="stageConfig.color === 'primary' ? 'primary' : stageConfig.color === 'success' ? 'success' : stageConfig.color === 'secondary' ? 'secondary' : 'neutral'"
+        variant="soft"
         size="sm"
       >
         {{ stageConfig.label }}
-      </UBadge>
+      </TWBadge>
     </div>
     
-    <!-- Form Count (if not compact) -->
+<!-- Form Count (if not compact) -->
     <div v-if="!compact && session.formInstanceIds.length > 0" class="mt-3">
       <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-        <UIcon name="i-heroicons-document-text" class="w-4 h-4" />
+        <TWIcon name="i-heroicons-document-text" size="sm" />
         <span>{{ session.formInstanceIds.length }} form(s) completed</span>
       </div>
     </div>
     
-    <!-- Action Button -->
+<!-- Action Button -->
     <div v-if="!compact" class="mt-4">
-      <UButton
+      <TWButton
         :color="triageConfig.color === 'error' ? 'error' : 'primary'"
         size="sm"
         block
         @click.stop="handleContinue"
       >
         {{ nextActionLabel }}
-        <UIcon name="i-heroicons-arrow-right" class="w-4 h-4 ml-1" />
-      </UButton>
+        <TWIcon name="i-heroicons-arrow-right" size="sm" class="ml-1" />
+      </TWButton>
     </div>
-  </UCard>
+</TWCard>
 </template>

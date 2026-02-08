@@ -89,10 +89,13 @@ class ClinicalFormEngine {
       // For peds_respiratory, use the specific version file
       const versionMap: Record<string, string> = {
         'peds_respiratory': '1.0.2',
+        'peds_respiratory_treatment': '1.0.0',
       };
 
       const version = versionMap[schemaId] || '1.0.2';
-      const schemaUrl = `/schemas/${schemaId}_v${version}.json`;
+      const schemaUrl = version 
+        ? `/schemas/${schemaId}_v${version}.json`
+        : `/schemas/${schemaId}.json`;
 
       console.log(`[ClinicalFormEngine] Fetching schema from: ${schemaUrl}`);
 
@@ -107,7 +110,7 @@ class ClinicalFormEngine {
       }
 
       const text = await response.text();
-      console.log(`[ClinicalFormEngine] Response text (first 200 chars): ${text.substring(0, 200)}`);
+      console.log(`[ClinicalFormEngine] Response text (first 1000 chars): ${text.substring(0, 1000)}`);
 
       const schema = JSON.parse(text) as ClinicalFormSchema;
       return schema;
@@ -881,6 +884,27 @@ class ClinicalFormEngine {
   }
 
   /**
+   * Update an existing instance with partial data
+   */
+  async updateInstance(
+    formId: string,
+    updates: Partial<ClinicalFormInstance>
+  ): Promise<ClinicalFormInstance> {
+    const instance = await this.loadInstance(formId);
+    
+    // Apply updates
+    Object.assign(instance, updates);
+    
+    // Update timestamp
+    instance.updatedAt = new Date().toISOString();
+    
+    // Save
+    await this.saveInstance(instance);
+    
+    return instance;
+  }
+
+  /**
    * Get instances by status (SPEC-GAP: Required by spec line 338)
    */
   async getInstancesByStatus(status: string): Promise<ClinicalFormInstance[]> {
@@ -939,6 +963,39 @@ class ClinicalFormEngine {
     return allDocs.filter((doc: ClinicalFormInstance) =>
       doc.syncStatus === 'pending' || doc.syncStatus === 'error'
     );
+  }
+
+  /**
+   * Get the latest form instance for a session
+   */
+  async getLatestInstanceBySession(options: {
+    schemaId: string;
+    sessionId: string;
+  }): Promise<ClinicalFormInstance | null> {
+    const { schemaId, sessionId } = options;
+    const security = useSecurityStore();
+    
+    if (!security.encryptionKey) {
+      throw new Error('[SecureDB] Database locked: encryption key not available');
+    }
+
+    const allDocs = await secureAllDocs<ClinicalFormInstance>(security.encryptionKey);
+    
+    // Find matching instances for this schema and session
+    const matching = allDocs.filter((doc: ClinicalFormInstance) =>
+      doc.schemaId === schemaId && doc.sessionId === sessionId
+    );
+    
+    if (matching.length === 0) {
+      return null;
+    }
+    
+    // Return the most recently updated instance
+    matching.sort((a, b) => 
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+    
+    return matching[0]!;
   }
 
   /**

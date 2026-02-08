@@ -34,7 +34,18 @@ export function useFormEngine() {
     return instance;
   }
   
+  /**
+   * Get the latest form instance for a session
+   */
+  async function getLatestInstanceBySession(options: {
+    schemaId: string;
+    sessionId: string;
+  }): Promise<ClinicalFormInstance | null> {
+    return await formEngine.getLatestInstanceBySession(options);
+  }
+  
   return {
-    getOrCreateInstance
+    getOrCreateInstance,
+    getLatestInstanceBySession
   };
 }

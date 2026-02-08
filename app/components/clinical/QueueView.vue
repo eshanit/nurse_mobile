@@ -9,9 +9,13 @@
  */
 
 import { ref, computed, onMounted } from 'vue';
+import { navigateTo } from '#app';
+import { formatDistanceToNow, format } from 'date-fns';
 import type { ClinicalSession, SessionQueue } from '~/services/sessionEngine';
 import { getOpenSessionsByPriority, createSession, initializeSessionEngine } from '~/services/sessionEngine';
 import { logSessionCreated } from '~/services/clinicalTimeline';
+import { TWButton, TWAlert, TWCard, TWBadge, TWIcon } from '~/components/ui';
+import SessionCard from './SessionCard.vue';
 
 interface Props {
   compact?: boolean;
@@ -42,8 +46,11 @@ const isLoading = ref(true);
 const isRefreshing = ref(false);
 const error = ref<string | null>(null);
 
+// Banner state for displaying status messages
+const bannerMessage = ref<string | null>(null);
+const bannerType = ref<'warning' | 'offline' | 'syncing' | 'error'>('warning');
+
 // ============================================
-// Computed
 // ============================================
 
 /**
@@ -82,6 +89,36 @@ const sections = computed(() => [
     icon: 'i-heroicons-check-circle'
   }
 ]);
+
+// ============================================
+// Navigation
+// ============================================
+
+/**
+ * Navigate back to previous page
+ */
+function handleBack() {
+  history.back();
+}
+
+// ============================================
+// Helper Functions
+// ============================================
+
+/**
+ * Format timestamp to relative time string using date-fns
+ */
+function formatTimeAgo(timestamp: number | undefined): string {
+  if (!timestamp) return 'Unknown';
+  return formatDistanceToNow(timestamp, { addSuffix: true });
+}
+
+/**
+ * Format timestamp to time string using date-fns
+ */
+function formatTime(timestamp: number): string {
+  return format(timestamp, 'HH:mm');
+}
 
 // ============================================
 // Methods
@@ -172,137 +209,261 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="queue-view">
+  <div class="min-h-screen bg-gray-900 p-4">
+    <!-- State Banner (if needed) -->
+    <div 
+      v-if="bannerMessage"
+      class="mb-4 p-3 rounded-lg flex items-center gap-3"
+      :class="{
+        'bg-yellow-900/30 border border-yellow-700': bannerType === 'warning',
+        'bg-orange-900/30 border border-orange-700': bannerType === 'offline',
+        'bg-blue-900/30 border border-blue-700': bannerType === 'syncing',
+        'bg-red-900/30 border border-red-700': bannerType === 'error'
+      }"
+    >
+      <div 
+        class="w-3 h-3 rounded-full animate-pulse"
+        :class="{
+          'bg-yellow-500': bannerType === 'warning',
+          'bg-orange-500': bannerType === 'offline',
+          'bg-blue-500': bannerType === 'syncing',
+          'bg-red-500': bannerType === 'error'
+        }"
+      ></div>
+      <span class="text-white text-sm">{{ bannerMessage }}</span>
+    </div>
+
     <!-- Header -->
-    <header class="flex items-center gap-4 mb-6">
-      <UButton
-        icon="i-heroicons-arrow-left"
-        color="neutral"
-        variant="ghost"
-        to="/dashboard"
-      />
-      <div class="flex-1">
-        <h2 class="text-xl font-semibold text-white">Patient Queue</h2>
-        <p class="text-sm text-gray-400">{{ totalCount }} patient{{ totalCount !== 1 ? 's' : '' }} waiting</p>
-      </div>
-      
-      <!-- Sync Status Indicator -->
-      <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-full">
-        <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-        <span class="text-gray-300 text-sm">Online</span>
-      </div>
-      
-      <div class="flex items-center gap-2">
-        <!-- Refresh Button -->
-        <UButton
-          icon="i-heroicons-arrow-path"
-          color="neutral"
-          variant="ghost"
-          :loading="isRefreshing"
-          @click="refresh"
-        />
-        
-        <!-- New Session Button -->
-        <UButton
-          icon="i-heroicons-plus"
-          color="primary"
-          @click="handleNewSession"
+    <header class="flex items-center justify-between mb-6">
+      <div class="flex items-center gap-4">
+        <button 
+          @click="handleBack"
+          class="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
         >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+        </button>
+        <div>
+          <h1 class="text-2xl font-bold text-white">Patient Queue</h1>
+          <p class="text-gray-400 text-sm">{{ totalCount }} patient{{ totalCount !== 1 ? 's' : '' }} waiting</p>
+        </div>
+      </div>
+      
+      <!-- Status Badge -->
+      <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-full">
+        <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+        <span class="text-gray-300 text-sm font-medium">Online</span>
+      </div>
+      
+      <!-- Header Actions -->
+      <div class="flex items-center gap-2">
+        <button 
+          @click="refresh"
+          :disabled="isRefreshing"
+          class="p-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg text-gray-400 hover:text-white transition-colors"
+        >
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            class="h-5 w-5"
+            :class="{ 'animate-spin': isRefreshing }"
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
+        <button 
+          @click="handleNewSession"
+          class="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
           New Session
-        </UButton>
+        </button>
       </div>
     </header>
-    
+
     <!-- Error State -->
-    <UAlert
-      v-if="error"
-      color="error"
-      variant="subtle"
-      :close-button="{ icon: 'i-heroicons-x-mark', color: 'gray', variant: 'ghost' }"
-      @close="error = null"
+    <div 
+      v-if="error" 
+      class="mb-6 p-4 bg-red-900/20 border border-red-700 rounded-xl flex items-center justify-between"
     >
-      {{ error }}
-    </UAlert>
-    
-    <!-- Loading State -->
-    <div v-if="isLoading && totalCount === 0" class="flex items-center justify-center py-12">
-      <UIcon name="i-heroicons-arrow-path" class="w-8 h-8 animate-spin text-gray-400" />
-      <span class="ml-3 text-gray-500">Loading queue...</span>
+      <div class="flex items-center gap-3">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span class="text-red-400 text-sm">{{ error }}</span>
+      </div>
+      <button 
+        @click="error = null"
+        class="p-1 text-red-400 hover:text-red-300"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
     </div>
-    
+
+    <!-- Loading State -->
+    <div v-if="isLoading && totalCount === 0" class="flex flex-col items-center justify-center py-20">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
+      <p class="text-white text-lg">Loading queue...</p>
+      <p class="text-gray-500 text-sm">Please wait while we fetch patient sessions</p>
+    </div>
+
     <!-- Empty State -->
-    <UCard
-      v-else-if="!isLoading && totalCount === 0"
-      class="text-center py-12 bg-gray-800"
+    <div 
+      v-else-if="!isLoading && totalCount === 0" 
+      class="bg-gray-800 rounded-xl p-8 text-center"
     >
-      <template #header>
-        <div class="hidden"></div>
-      </template>
-      <UIcon name="i-heroicons-users" class="w-12 h-12 mx-auto text-gray-400 mb-4" />
-      <h3 class="text-lg font-medium text-white mb-2">
-        No patients waiting
-      </h3>
-      <p class="text-gray-400 mb-4">
-        Start a new clinical session to begin.
-      </p>
-      <UButton
-        icon="i-heroicons-plus"
-        color="primary"
+      <div class="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.67 2.137a10.02 10.02 0 01-.671 5.197" />
+        </svg>
+      </div>
+      <h3 class="text-lg font-medium text-white mb-2">No patients waiting</h3>
+      <p class="text-gray-400 mb-6">Start a new clinical session to begin.</p>
+      <button 
         @click="handleNewSession"
+        class="px-6 py-3 bg-blue-700 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors"
       >
         New Session
-      </UButton>
-    </UCard>
-    
+      </button>
+    </div>
+
     <!-- Queue Sections -->
     <div v-else class="space-y-6">
       <template v-for="section in sections" :key="section.key">
         <!-- Section Header -->
-        <div
+        <div 
           v-if="section.sessions.length > 0"
-          class="flex items-center gap-3 pb-2 border-b border-gray-200 dark:border-gray-700"
+          class="flex items-center gap-3 pb-3 border-b border-gray-700"
         >
-          <UIcon
-            :name="section.icon"
-            :class="{
-              'text-red-500': section.color === 'error',
-              'text-amber-500': section.color === 'warning',
-              'text-green-500': section.color === 'success'
-            }"
-            class="w-5 h-5"
-          />
-          <div>
-            <h3 class="font-semibold text-gray-900 dark:text-white">
-              {{ section.label }}
-            </h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ section.description }}
-            </p>
+          <div class="flex items-center gap-3">
+            <div 
+              class="w-8 h-8 rounded-lg flex items-center justify-center"
+              :class="{
+                'bg-red-900/50': section.color === 'error',
+                'bg-yellow-900/50': section.color === 'warning',
+                'bg-green-900/50': section.color === 'success',
+                'bg-blue-900/50': section.color === 'primary'
+              }"
+            >
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                class="h-4 w-4"
+                :class="{
+                  'text-red-400': section.color === 'error',
+                  'text-yellow-400': section.color === 'warning',
+                  'text-green-400': section.color === 'success',
+                  'text-blue-400': section.color === 'primary'
+                }"
+                fill="none" 
+                viewBox="0 0 24 24" 
+                stroke="currentColor"
+              >
+                <path 
+                  stroke-linecap="round" 
+                  stroke-linejoin="round" 
+                  stroke-width="2" 
+                  :d="section.icon" 
+                />
+              </svg>
+            </div>
+            <div>
+              <h3 class="font-semibold text-white">{{ section.label }}</h3>
+              <p class="text-xs text-gray-400">{{ section.description }}</p>
+            </div>
           </div>
-          <UBadge
-            :color="section.color as 'error' | 'warning' | 'success' | 'neutral'"
-            variant="solid"
-            size="sm"
-            class="ml-auto"
+          <div 
+            class="ml-auto px-3 py-1 rounded-full text-sm font-medium"
+            :class="{
+              'bg-red-900/30 text-red-400': section.color === 'error',
+              'bg-yellow-900/30 text-yellow-400': section.color === 'warning',
+              'bg-green-900/30 text-green-400': section.color === 'success',
+              'bg-blue-900/30 text-blue-400': section.color === 'primary'
+            }"
           >
             {{ section.sessions.length }}
-          </UBadge>
+          </div>
         </div>
-        
+
         <!-- Section Sessions -->
-        <div
+        <div 
           v-if="section.sessions.length > 0"
           class="space-y-3"
           :class="{ 'pl-4': compact }"
         >
-          <ClinicalSessionCard
+          <div 
             v-for="session in section.sessions"
             :key="session.id"
-            :session="session"
-            :compact="compact"
-            @click="handleSessionClick"
-            @action="handleSessionAction"
-          />
+            class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors border border-transparent hover:border-gray-700"
+            :class="{
+              'border-red-500/30': session.triage === 'red',
+              'border-yellow-500/30': session.triage === 'yellow',
+              'border-green-500/30': session.triage === 'green'
+            }"
+            @click="handleSessionClick(session)"
+          >
+            <div class="flex items-start justify-between">
+              <div class="flex-1">
+                <div class="flex items-center gap-3 mb-2">
+                  <!-- Priority Indicator -->
+                  <div 
+                    class="w-2 h-2 rounded-full"
+                    :class="{
+                      'bg-red-500': session.triage === 'red',
+                      'bg-yellow-500': session.triage === 'yellow',
+                      'bg-green-500': session.triage === 'green',
+                      'bg-gray-500': !session.triage
+                    }"
+                  ></div>
+                  <span class="text-white font-medium">{{ session.patientName }}</span>
+                  <span 
+                    class="text-xs px-2 py-1 rounded-full"
+                    :class="{
+                      'bg-red-900/30 text-red-400': session.triage === 'red',
+                      'bg-yellow-900/30 text-yellow-400': session.triage === 'yellow',
+                      'bg-green-900/30 text-green-400': session.triage === 'green'
+                    }"
+                  >
+                    {{ session.triage?.charAt(0).toUpperCase() + session.triage?.slice(1) || 'Normal' }}
+                  </span>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4 mb-3">
+                  <div>
+                    <p class="text-xs text-gray-400">Reason</p>
+                    <p class="text-sm text-white">{{ session.chiefComplaint || 'Not specified' }}</p>
+                  </div>
+                  <div>
+                    <p class="text-xs text-gray-400">Time in Queue</p>
+                    <p class="text-sm text-white">{{ formatTimeAgo(session.createdAt) }}</p>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span class="text-gray-400 text-sm">Arrived {{ formatTime(session.createdAt) }}</span>
+                </div>
+              </div>
+
+              <!-- Action Button -->
+              <button 
+                @click.stop="handleSessionAction(session, 'continue')"
+                class="ml-4 p-2 bg-blue-900/30 hover:bg-blue-800/40 text-blue-400 rounded-lg transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
       </template>
     </div>

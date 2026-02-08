@@ -300,37 +300,42 @@ function handleBlur(event: FocusEvent) {
   width: 100%;
 }
 
-/* Dark theme adjustments */
-:deep(.u-input) {
-  background-color: #374151 !important;
+/* Dark theme adjustments - White text for all input types */
+:deep(.u-input input),
+:deep(.u-input .u-input__input),
+:deep(.u-select .u-select__selected),
+:deep(.u-textarea textarea) {
   color: white !important;
-  border-color: #4b5563 !important;
+  background-color: transparent !important;
 }
 
-:deep(.u-input:focus) {
-  border-color: #3b82f6 !important;
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2) !important;
-}
-
-:deep(.u-select) {
-  background-color: #374151 !important;
-  color: white !important;
-  border-color: #4b5563 !important;
-}
-
-:deep(.u-select:focus) {
-  border-color: #3b82f6 !important;
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2) !important;
-}
-
+:deep(.u-input),
+:deep(.u-select),
 :deep(.u-textarea) {
   background-color: #374151 !important;
   color: white !important;
   border-color: #4b5563 !important;
 }
 
+:deep(.u-input:focus),
+:deep(.u-select:focus),
 :deep(.u-textarea:focus) {
   border-color: #3b82f6 !important;
   box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Placeholder text color */
+:deep(.u-input input::placeholder),
+:deep(.u-textarea textarea::placeholder) {
+  color: #9ca3af !important;
+}
+
+/* Select dropdown text */
+:deep(.u-select .u-select__placeholder) {
+  color: #9ca3af !important;
+}
+
+:deep(.u-select .u-select__selected) {
+  color: white !important;
 }
 </style>

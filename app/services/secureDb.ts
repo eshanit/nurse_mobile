@@ -196,14 +196,32 @@ export async function secureGet<T>(
       return doc as unknown as T;
     }
     
-    const payload: EncryptedPayload = JSON.parse(doc.data);
-    const decryptedData = JSON.parse(await decryptData(payload, encryptionKey));
-    
-    return {
-      _id: doc._id,
-      _rev: doc._rev,
-      ...decryptedData
-    } as T;
+    try {
+      const payload: EncryptedPayload = JSON.parse(doc.data);
+      const decryptedData = JSON.parse(await decryptData(payload, encryptionKey));
+      
+      return {
+        _id: doc._id,
+        _rev: doc._rev,
+        ...decryptedData
+      } as T;
+    } catch (decryptError) {
+      // Log decryption failure with details
+      console.error('[SecureDB] Failed to decrypt document:', {
+        documentId: id,
+        error: decryptError instanceof DOMException 
+          ? `${decryptError.name} (code: ${decryptError.code})` 
+          : String(decryptError),
+        encryptedAt: doc.encryptedAt
+      });
+      
+      if (decryptError instanceof DOMException && decryptError.name === 'OperationError') {
+        console.warn('[SecureDB] Possible encryption key mismatch for document:', id);
+      }
+      
+      // Return null for undecryptable documents instead of throwing
+      return null;
+    }
   } catch (error) {
     if ((error as { status?: number }).status === 404) {
       return null;
@@ -268,8 +286,24 @@ export async function secureAllDocs<T extends { _id: string; _rev?: string }>(
             ...decryptedData
           } as T);
         } catch (error) {
-          console.error('[SecureDB] Failed to decrypt document:', row.id, error);
-          // Skip corrupted documents
+          // Enhanced error logging for decryption failures
+          const errorMessage = error instanceof DOMException 
+            ? `${error.name} (code: ${error.code})` 
+            : String(error);
+          
+          console.error('[SecureDB] Failed to decrypt document:', {
+            documentId: row.id,
+            error: errorMessage,
+            encryptedAt: doc.encryptedAt,
+            dataLength: doc.data?.length || 0
+          });
+          
+          // Check for key mismatch indicators
+          if (error instanceof DOMException && error.name === 'OperationError') {
+            console.warn('[SecureDB] Possible encryption key mismatch - document may have been encrypted with different credentials');
+          }
+          
+          // Skip corrupted/undecryptable documents gracefully
         }
       } else {
         docs.push(row.doc as T);
