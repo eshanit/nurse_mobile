@@ -4,17 +4,13 @@ import { formatDistanceToNow, format } from 'date-fns';
 import { useAuth } from '@/composables/useAuth';
 import { useSecurityStore } from '@/stores/security';
 import { useDashboardStore, type DashboardState } from '@/stores/dashboard';
+import { getPatientByCPT } from '~/services/patientEngine';
+import { sanitizeCPTInput, validateCPTFormat } from '~/services/patientId';
+import type { ClinicalPatient } from '~/types/patient';
 
 const auth = useAuth();
 const securityStore = useSecurityStore();
 const dashboardStore = useDashboardStore();
-
-// ----- PIN Entry State -----
-const showPinModal = ref(false);
-const pinEntry = ref('');
-const pinError = ref('');
-const isVerifyingPin = ref(false);
-const pinEntryError = ref<boolean>(false);
 
 // ----- Icon Component Mapping -----
 const iconComponents: Record<string, any> = {
@@ -23,29 +19,24 @@ const iconComponents: Record<string, any> = {
       h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' })
     ])
   },
-  'i-heroicons-key': {
-    render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z' })
-    ])
-  },
   'i-heroicons-check-circle': {
     render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
       h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' })
     ])
   },
-  'i-heroicons-wifi-slash': {
+  'i-heroicons-user-plus': {
     render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3m8.293 8.293l1.414 1.414' })
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z' })
     ])
   },
-  'i-heroicons-arrow-path': {
-    render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5 animate-spin', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' })
+  'i-heroicons-magnifying-glass': {
+    render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' })
     ])
   },
-  'i-heroicons-exclamation-circle': {
+  'i-heroicons-qr-code': {
     render: () => h('svg', { xmlns: 'http://www.w3.org/2000/svg', class: 'h-5 w-5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' })
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z' })
     ])
   }
 };
@@ -70,18 +61,14 @@ const isError = computed(() => dashboardStore.isError);
 // ----- Dashboard Data -----
 const hasDraft = computed(() => dashboardStore.hasDraft);
 const draftMeta = computed(() => dashboardStore.draftMeta);
-const awaitingSyncCount = computed(() => dashboardStore.awaitingSyncCount);
-const urgentCount = computed(() => dashboardStore.urgentCount);
 const stats = computed(() => dashboardStore.stats);
 const recent = computed(() => dashboardStore.recent);
-const syncStatus = computed(() => dashboardStore.syncStatus);
-const syncProgress = computed(() => dashboardStore.syncProgress);
 
-// ----- Security State -----
-const testRecordStatus = ref<'pending' | 'success' | 'failed' | 'not_created'>('pending');
-const isCreatingTestRecord = ref(false);
-
-const needsTestRecord = computed(() => testRecordStatus.value === 'not_created' || testRecordStatus.value === 'failed');
+// ----- Patient Lookup State -----
+const cptInput = ref('');
+const isLookingUpPatient = ref(false);
+const lookupError = ref<string | null>(null);
+const foundPatient = ref<ClinicalPatient | null>(null);
 
 // ----- Stats Color Classes -----
 const redStatsClass = computed(() => stats.value.red > 0 ? 'bg-red-500' : 'bg-gray-600');
@@ -105,14 +92,20 @@ function handleOffline() {
   }
 }
 
+// ----- PIN Entry State -----
+const showPinModal = ref(false);
+const pinEntry = ref('');
+const pinError = ref('');
+const isVerifyingPin = ref(false);
+const pinEntryError = ref<boolean>(false);
+
 // ----- Security Actions -----
 async function verifyTestRecord() {
   testRecordStatus.value = 'pending';
   
-  // Check if we need PIN to unlock
   if (securityStore.needsPinToUnlock()) {
     showPinModal.value = true;
-    pinEntryError.value = true; // Show error state
+    pinEntryError.value = true;
     testRecordStatus.value = 'failed';
     return;
   }
@@ -121,11 +114,9 @@ async function verifyTestRecord() {
     const isValid = await securityStore.verifyEncryptedTestRecord();
     if (isValid) {
       testRecordStatus.value = 'success';
-      // Now transition to READY and load dashboard
       dashboardStore.transitionToReady();
       await dashboardStore.loadDashboard();
       
-      // Check initial network status
       if (!navigator.onLine) {
         dashboardStore.transitionToOffline();
       }
@@ -135,7 +126,6 @@ async function verifyTestRecord() {
   } catch (error) {
     console.error('[Dashboard] Test record verification failed:', error);
     
-    // Check if PIN is needed after failure
     if (securityStore.needsPinToUnlock()) {
       showPinModal.value = true;
       pinEntryError.value = true;
@@ -143,6 +133,11 @@ async function verifyTestRecord() {
     testRecordStatus.value = 'failed';
   }
 }
+
+const testRecordStatus = ref<'pending' | 'success' | 'failed' | 'not_created'>('pending');
+const isCreatingTestRecord = ref(false);
+
+const needsTestRecord = computed(() => testRecordStatus.value === 'not_created' || testRecordStatus.value === 'failed');
 
 async function createTestRecord() {
   isCreatingTestRecord.value = true;
@@ -174,7 +169,6 @@ async function submitPin() {
     const unlocked = await securityStore.unlockWithPin(pinEntry.value);
     if (unlocked) {
       closePinModal();
-      // Retry verification after successful unlock
       await verifyTestRecord();
     } else {
       pinError.value = 'Invalid PIN';
@@ -194,7 +188,6 @@ function handlePinInput(event: Event) {
   pinEntry.value = value;
   input.value = value;
   
-  // Auto-submit when 4 digits entered
   if (value.length === 4) {
     submitPin();
   }
@@ -202,21 +195,16 @@ function handlePinInput(event: Event) {
 
 // ----- Lifecycle -----
 onMounted(async () => {
-  // Setup network listeners
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
   onlineStatus = navigator.onLine;
 
-  // Auth check
   if (!isAuthenticated.value) {
     navigateTo('/');
     return;
   }
 
-  // Transition to UNLOCKING state
   dashboardStore.transitionToUnlocking();
-  
-  // Verify or create test record
   await verifyTestRecord();
 });
 
@@ -225,49 +213,136 @@ onUnmounted(() => {
   window.removeEventListener('offline', handleOffline);
 });
 
-// ----- Actions -----
-function handleLogout() {
-  dashboardStore.transitionToLocked();
-  auth.logout();
-  navigateTo('/');
+// ============================================
+// PATIENT-FIRST ACTIONS
+// ============================================
+
+/**
+ * Navigate to new patient registration
+ */
+function navigateToNewPatient() {
+  navigateTo('/patient/new');
 }
 
-function handleNewAssessment() {
-  if (dashboardStore.canCreateNewAssessment) {
-    navigateTo('/assessment/new');
+/**
+ * Navigate to patient lookup
+ */
+function navigateToPatientLookup() {
+  navigateTo('/patient/lookup');
+}
+
+/**
+ * Handle patient lookup by CPT
+ */
+async function handleCPTLookup() {
+  if (!cptInput.value.trim()) {
+    lookupError.value = 'Please enter a CPT';
+    return;
+  }
+  
+  // Sanitize CPT input
+  const sanitized = sanitizeCPTInput(cptInput.value);
+  
+  // Validate format
+  const validation = validateCPTFormat(sanitized);
+  if (!validation.isValid) {
+    lookupError.value = validation.error || 'Invalid CPT format';
+    return;
+  }
+  
+  isLookingUpPatient.value = true;
+  lookupError.value = null;
+  foundPatient.value = null;
+  
+  try {
+    const result = await getPatientByCPT(sanitized);
+    
+    if (result.found && result.patient) {
+      // Patient found - navigate to patient profile
+      foundPatient.value = result.patient;
+      
+      // Navigate to session creation with patient
+      navigateTo(`/sessions/new?patientCpt=${result.patient.cpt}`);
+    } else {
+      lookupError.value = 'Patient not found. Would you like to register this CPT?';
+    }
+  } catch (error) {
+    console.error('[Dashboard] Patient lookup failed:', error);
+    lookupError.value = 'Failed to lookup patient. Please try again.';
+  } finally {
+    isLookingUpPatient.value = false;
   }
 }
 
+/**
+ * Handle CPT input change - clear errors
+ */
+function handleCPTInputChange() {
+  lookupError.value = null;
+  foundPatient.value = null;
+}
+
+/**
+ * Navigate to sessions list
+ */
 function handleOpenSessions() {
   navigateTo('/sessions');
 }
 
-function handleViewRecords(filter: string) {
-  navigateTo(`/records?filter=${filter}`);
+/**
+ * Navigate to patient records
+ */
+function handleViewRecords() {
+  navigateTo('/records');
 }
 
+/**
+ * Handle sync
+ */
 function handleSync() {
   if (dashboardStore.isReady || dashboardStore.isOffline) {
     dashboardStore.transitionToSyncing();
-    // Simulate sync completion after delay
     setTimeout(() => {
       dashboardStore.handleSyncComplete();
     }, 2000);
   }
 }
 
-function handleResumeDraft() {
-  if (hasDraft.value && draftMeta.value) {
+/**
+ * Handle logout
+ */
+function handleLogout() {
+  dashboardStore.transitionToLocked();
+  auth.logout();
+  navigateTo('/');
+}
+
+/**
+ * Navigate to draft assessment (null-safe)
+ */
+function navigateToDraft() {
+  if (draftMeta.value) {
     navigateTo(`/assessment/${draftMeta.value.workflow}/edit`);
   }
 }
+
+/**
+ * Navigate to session detail (null-safe)
+ */
+function navigateToSession(sessionId?: string) {
+  if (sessionId) {
+    navigateTo(`/sessions/${sessionId}`);
+  }
+}
+
+// ============================================
+// FORMATTING HELPERS
+// ============================================
 
 function formatTimeAgo(timestamp: string | undefined): string {
   if (!timestamp) return 'Unknown';
   const date = new Date(timestamp);
   if (isNaN(date.getTime())) return 'Unknown';
-  
-  // Use date-fns for relative time formatting
   return formatDistanceToNow(date, { addSuffix: true });
 }
 
@@ -275,12 +350,9 @@ function formatDate(date: string | undefined): string {
   if (!date) return 'Invalid Date';
   const d = new Date(date);
   if (isNaN(d.getTime())) return 'Invalid Date';
-  
-  // Use date-fns for date formatting
   return format(d, 'MMM d, yyyy');
 }
 
-// State indicator helper
 function getStateColor(state: DashboardState): string {
   switch (state) {
     case 'LOCKED': return 'bg-gray-500';
@@ -320,7 +392,7 @@ function getStateColor(state: DashboardState): string {
       >
         <div 
           class="h-full bg-blue-500 transition-all duration-300"
-          :style="{ width: `${syncProgress}%` }"
+          :style="{ width: `${dashboardStore.syncProgress}%` }"
         ></div>
       </div>
     </div>
@@ -329,12 +401,17 @@ function getStateColor(state: DashboardState): string {
     <header class="flex items-center justify-between mb-6">
       <div>
         <h1 class="text-2xl font-bold text-white">HealthBridge</h1>
-        <p class="text-gray-400 text-sm">Welcome, {{ nurseName }}</p>
+        <p class="text-gray-400 text-sm">Patient-First Clinical Workflow</p>
       </div>
       
       <!-- State Badge -->
       <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-full">
-        <component :is="getHeaderBadgeIcon(headerBadge.icon)" v-if="getHeaderBadgeIcon(headerBadge.icon)" class="text-lg" :class="{ 'animate-spin': headerBadge.icon === 'i-heroicons-arrow-path' }"></component>
+        <component 
+          :is="getHeaderBadgeIcon(headerBadge.icon)" 
+          v-if="getHeaderBadgeIcon(headerBadge.icon)" 
+          class="text-lg" 
+          :class="{ 'animate-spin': headerBadge.icon === 'i-heroicons-arrow-path' }"
+        ></component>
         <span class="text-gray-300 text-sm font-medium">{{ headerBadge.text }}</span>
       </div>
       
@@ -346,7 +423,7 @@ function getStateColor(state: DashboardState): string {
       </button>
     </header>
 
-    <!-- Test Record Needed State (not created yet) -->
+    <!-- Test Record Needed State -->
     <div v-if="needsTestRecord" class="mb-6 p-4 bg-blue-900/20 border border-blue-700 rounded-xl">
       <div class="flex items-center gap-3 mb-4">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -397,7 +474,7 @@ function getStateColor(state: DashboardState): string {
         <div 
           class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
           :class="{ 'ring-2 ring-red-500': stats.red > 0 }"
-          @click="handleViewRecords('urgent')"
+          @click="handleViewRecords"
         >
           <div class="flex items-center justify-between mb-2">
             <span class="text-red-400 text-xs font-medium uppercase tracking-wide">Urgent</span>
@@ -410,7 +487,7 @@ function getStateColor(state: DashboardState): string {
         <div 
           class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
           :class="{ 'ring-2 ring-yellow-500': stats.yellow > 0 }"
-          @click="handleViewRecords('attention')"
+          @click="handleViewRecords"
         >
           <div class="flex items-center justify-between mb-2">
             <span class="text-yellow-400 text-xs font-medium uppercase tracking-wide">Attention</span>
@@ -423,7 +500,7 @@ function getStateColor(state: DashboardState): string {
         <div 
           class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
           :class="{ 'ring-2 ring-green-500': stats.green > 0 }"
-          @click="handleViewRecords('stable')"
+          @click="handleViewRecords"
         >
           <div class="flex items-center justify-between mb-2">
             <span class="text-green-400 text-xs font-medium uppercase tracking-wide">Stable</span>
@@ -433,126 +510,155 @@ function getStateColor(state: DashboardState): string {
         </div>
       </div>
 
-      <!-- Action Cards Row -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+      <!-- PATIENT-FIRST ACTION CARDS -->
+      <div class="bg-gray-800 rounded-xl p-4 mb-6">
+        <h2 class="text-white font-semibold mb-4">Identify Patient First</h2>
+        <p class="text-gray-400 text-sm mb-4">All clinical workflows require a patient. Start by identifying your patient.</p>
         
-        <!-- Draft Encounter Card -->
-        <div 
-          v-if="hasDraft"
-          class="bg-gray-800 rounded-xl p-4 border border-blue-500/30 cursor-pointer hover:bg-gray-750 transition-colors"
-          @click="handleResumeDraft"
-        >
-          <div class="flex items-center gap-3 mb-3">
-            <div class="w-10 h-10 rounded-full bg-blue-900/50 flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- New Patient Card -->
+          <button 
+            @click="navigateToNewPatient"
+            class="p-4 bg-blue-900/30 hover:bg-blue-800/40 border border-blue-700/50 rounded-lg transition-colors text-left"
+          >
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full bg-blue-900/50 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                </svg>
+              </div>
+              <div>
+                <p class="text-white font-medium">🆕 New Patient</p>
+                <p class="text-gray-400 text-xs">First time patient? Create CPT</p>
+              </div>
             </div>
+          </button>
+
+          <!-- Returning Patient Card -->
+          <button 
+            @click="navigateToPatientLookup"
+            class="p-4 bg-green-900/30 hover:bg-green-800/40 border border-green-700/50 rounded-lg transition-colors text-left"
+          >
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full bg-green-900/50 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <div>
+                <p class="text-white font-medium">🔍 Returning Patient</p>
+                <p class="text-gray-400 text-xs">Have a CPT? Find patient record</p>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick CPT Lookup (Inline) -->
+      <div class="bg-gray-800 rounded-xl p-4 mb-6">
+        <h3 class="text-white font-medium mb-3">Quick CPT Lookup</h3>
+        
+        <div class="flex gap-2">
+          <input
+            type="text"
+            v-model="cptInput"
+            @input="handleCPTInputChange"
+            placeholder="Enter CPT (e.g., CP-7F3A-K92Q)"
+            class="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          <button 
+            @click="handleCPTLookup"
+            :disabled="isLookingUpPatient"
+            class="px-6 py-3 bg-blue-700 hover:bg-blue-600 disabled:bg-blue-800 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+          >
+            <svg v-if="isLookingUpPatient" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>{{ isLookingUpPatient ? 'Looking up...' : 'Find' }}</span>
+          </button>
+        </div>
+        
+        <!-- Lookup Error -->
+        <div v-if="lookupError" class="mt-3 p-3 bg-red-900/30 border border-red-700/50 rounded-lg">
+          <p class="text-red-400 text-sm">{{ lookupError }}</p>
+        </div>
+        
+        <!-- Found Patient -->
+        <div v-if="foundPatient" class="mt-3 p-3 bg-green-900/30 border border-green-700/50 rounded-lg">
+          <div class="flex items-center gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
             <div>
-              <h3 class="text-white font-semibold">Resume Draft</h3>
-              <p class="text-gray-400 text-xs">{{ draftMeta?.workflow || 'In Progress' }}</p>
+              <p class="text-green-400 font-medium">Patient Found: {{ foundPatient.cpt }}</p>
+              <p class="text-gray-400 text-sm">
+                {{ foundPatient.firstName }} {{ foundPatient.lastName }}
+                <span v-if="foundPatient.dateOfBirth"> • DOB: {{ foundPatient.dateOfBirth }}</span>
+              </p>
             </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-blue-400 text-sm">Tap to continue</span>
           </div>
         </div>
+      </div>
 
-        <!-- Awaiting Sync Card -->
-        <div 
-          v-if="awaitingSyncCount > 0" 
-          class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
-          @click="handleViewRecords('pending')"
-        >
-          <div class="flex items-center gap-3 mb-3">
-            <div class="w-10 h-10 rounded-full bg-yellow-900/50 flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </div>
-            <div>
-              <h3 class="text-white font-semibold">Pending Sync</h3>
-              <p class="text-gray-400 text-xs">Awaiting upload</p>
-            </div>
+      <!-- Session Draft Card -->
+      <div 
+        v-if="hasDraft && draftMeta"
+        class="bg-gray-800 rounded-xl p-4 border border-blue-500/30 mb-6 cursor-pointer hover:bg-gray-750 transition-colors"
+        @click="navigateToDraft()"
+      >
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-10 h-10 rounded-full bg-blue-900/50 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
           </div>
-          <div class="flex items-center gap-2">
-            <span class="text-yellow-400 text-sm">{{ awaitingSyncCount }} item{{ awaitingSyncCount !== 1 ? 's' : '' }}</span>
+          <div>
+            <h3 class="text-white font-semibold">📝 Resume Session</h3>
+            <p class="text-gray-400 text-xs">{{ draftMeta.workflow || 'In Progress' }}</p>
           </div>
         </div>
-
-        <!-- Urgent Items Card -->
-        <div 
-          v-if="urgentCount > 0" 
-          class="bg-gray-800 rounded-xl p-4 border border-red-500/30 cursor-pointer hover:bg-gray-750 transition-colors"
-          @click="handleViewRecords('urgent')"
-        >
-          <div class="flex items-center gap-3 mb-3">
-            <div class="w-10 h-10 rounded-full bg-red-900/50 flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            </div>
-            <div>
-              <h3 class="text-white font-semibold">Needs Review</h3>
-              <p class="text-gray-400 text-xs">Urgent items</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-red-400 text-sm">{{ urgentCount }} urgent</span>
-          </div>
+        <div class="flex items-center gap-2">
+          <span class="text-blue-400 text-sm">Tap to continue</span>
         </div>
       </div>
 
       <!-- Quick Actions -->
-      <div class="bg-gray-800 rounded-xl p-4 mb-6">
-        <h2 class="text-white font-semibold mb-4">Quick Actions</h2>
-        <div class="grid grid-cols-3 gap-3">
-          <button 
-            @click="handleOpenSessions"
-            class="p-4 bg-purple-900/30 hover:bg-purple-800/40 border border-purple-700/50 rounded-lg transition-colors text-left"
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        <button 
+          @click="handleOpenSessions"
+          class="p-4 bg-purple-900/30 hover:bg-purple-800/40 border border-purple-700/50 rounded-lg transition-colors text-left"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-purple-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+          </svg>
+          <p class="text-white font-medium">Patient Sessions</p>
+          <p class="text-gray-400 text-xs">View all sessions</p>
+        </button>
+        
+        <button 
+          @click="handleSync"
+          :disabled="isSyncing"
+          class="p-4 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg transition-colors text-left"
+        >
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            class="h-6 w-6 text-green-400 mb-2" 
+            :class="{ 'animate-spin': isSyncing }"
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-purple-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-            </svg>
-            <p class="text-white font-medium">Open Sessions</p>
-            <p class="text-gray-400 text-xs">Patient queue</p>
-          </button>
-          <button 
-            @click="handleNewAssessment"
-            :disabled="!dashboardStore.canCreateNewAssessment"
-            class="p-4 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg transition-colors text-left"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-            </svg>
-            <p class="text-white font-medium">New Assessment</p>
-            <p class="text-gray-400 text-xs">Start patient encounter</p>
-          </button>
-          <button 
-            @click="handleSync"
-            :disabled="isSyncing"
-            class="p-4 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg transition-colors text-left"
-          >
-            <svg 
-              xmlns="http://www.w3.org/2000/svg" 
-              class="h-6 w-6 text-green-400 mb-2" 
-              :class="{ 'animate-spin': isSyncing }"
-              fill="none" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            <p class="text-white font-medium">Sync Now</p>
-            <p class="text-gray-400 text-xs">{{ isOffline ? 'Go online to sync' : 'Push/pull changes' }}</p>
-          </button>
-        </div>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <p class="text-white font-medium">Sync Now</p>
+          <p class="text-gray-400 text-xs">{{ isOffline ? 'Go online to sync' : 'Push/pull changes' }}</p>
+        </button>
       </div>
 
-      <!-- Recent Activity Feed -->
+      <!-- Recent Sessions -->
       <div class="bg-gray-800 rounded-xl p-4">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-white font-semibold">Recent Activity</h2>
+          <h2 class="text-white font-semibold">Recent Sessions</h2>
           <span class="text-gray-500 text-xs">{{ recent.length }} items</span>
         </div>
         
@@ -560,15 +666,16 @@ function getStateColor(state: DashboardState): string {
           <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-gray-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
-          <p class="text-gray-500 text-sm">No recent activity</p>
-          <p class="text-gray-600 text-xs">Start an assessment to see activity here</p>
+          <p class="text-gray-500 text-sm">No recent sessions</p>
+          <p class="text-gray-600 text-xs">Start with a patient to see sessions here</p>
         </div>
         
         <div v-else class="space-y-2">
           <div 
             v-for="item in recent" 
             :key="item.id"
-            class="flex items-center justify-between py-3 border-b border-gray-700 last:border-0"
+            class="flex items-center justify-between py-3 border-b border-gray-700 last:border-0 cursor-pointer hover:bg-gray-700/30 px-2 rounded-lg transition-colors"
+            @click="navigateToSession(item.sessionId)"
           >
             <div class="flex items-center gap-3">
               <!-- Priority Indicator -->
@@ -585,6 +692,7 @@ function getStateColor(state: DashboardState): string {
               
               <div>
                 <p class="text-white text-sm">{{ item.title }}</p>
+                <p v-if="item.patientCpt" class="text-blue-400 text-xs">CPT: {{ item.patientCpt }}</p>
                 <p v-if="item.description" class="text-gray-500 text-xs">{{ item.description }}</p>
               </div>
             </div>
@@ -605,7 +713,7 @@ function getStateColor(state: DashboardState): string {
       <p class="text-gray-500 text-sm">Please wait while we unlock your data</p>
     </div>
 
-    <!-- LOCKED State (should redirect but fallback) -->
+    <!-- LOCKED State -->
     <div v-else class="flex flex-col items-center justify-center py-20">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-gray-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />

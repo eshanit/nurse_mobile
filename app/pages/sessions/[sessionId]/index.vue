@@ -29,6 +29,7 @@ import { useFormEngine } from '~/composables/useFormEngine';
 import { formEngine } from '~/services/formEngine';
 import { useToast } from '@/composables/useToast';
 import { TWButton, TWBadge, TWCard } from '~/components/ui';
+import { useSessionPatient } from '~/composables/useSessionPatient';
 
 // ============================================
 // Route & Params
@@ -68,6 +69,61 @@ const assessmentCompleted = ref(false);
 const assessmentFormId = ref<string | null>(null);
 const formInstances = ref<any[]>([]);
 const isLoadingForms = ref(false);
+
+// ============================================
+// Session Patient Persistence
+// ============================================
+
+/**
+ * Session patient persistence composable
+ * Uses sessionStorage to persist patient data across page navigation
+ */
+const { patientData: persistedPatient, hasPatient: hasPersistedPatient } = useSessionPatient({
+  sessionId,
+  autoHydrate: true
+});
+
+/**
+ * Get the patient name - from session data first, then persisted storage
+ */
+const patientName = computed(() => {
+  // First check session data
+  if (session.value?.patientName) {
+    return session.value.patientName;
+  }
+  // Fall back to persisted data
+  if (persistedPatient.value?.patientName) {
+    return persistedPatient.value.patientName;
+  }
+  return null;
+});
+
+/**
+ * Get the patient ID - from session data first, then persisted storage
+ */
+const patientId = computed(() => {
+  if (session.value?.patientId) {
+    return session.value.patientId;
+  }
+  if (persistedPatient.value?.patientId) {
+    return persistedPatient.value.patientId;
+  }
+  return null;
+});
+
+/**
+ * Check if patient is registered (has data in session or persisted storage)
+ */
+const isPatientRegistered = computed(() => {
+  if (!session.value) return false;
+  // PatientId exists in session
+  if (session.value.patientId) return true;
+  // Patient data exists in persisted storage
+  if (hasPersistedPatient.value) return true;
+  // Stage has advanced past registration
+  if (session.value.stage !== 'registration') return true;
+  return false;
+});
 
 // Set initial tab after session loads
 watch(session, (newSession) => {
@@ -339,20 +395,6 @@ const availableStages = computed((): ClinicalSessionStage[] => {
   
   const currentIndex = stages.indexOf(session.value.stage);
   return stages.slice(currentIndex);
-});
-
-/**
- * Is patient registered (has been through registration)
- * - If patientId exists, definitely registered
- * - OR if session stage is past 'registration', patient has completed registration
- */
-const isPatientRegistered = computed(() => {
-  if (!session.value) return false;
-  // PatientId exists
-  if (session.value.patientId) return true;
-  // Stage has advanced past registration
-  if (session.value.stage !== 'registration') return true;
-  return false;
 });
 
 /**
@@ -1028,18 +1070,18 @@ onMounted(async () => {
               </div>
               <div>
                 <h3 class="text-lg font-semibold text-white">Registration Complete</h3>
-                <p class="text-gray-400 text-sm">{{ session?.patientName || 'Patient' }} is registered</p>
+                <p class="text-gray-400 text-sm">{{ patientName || 'Patient' }} is registered</p>
               </div>
             </div>
             
             <div class="grid grid-cols-2 gap-4 mb-6">
               <div>
                 <p class="text-sm text-gray-400 mb-1">Patient Name</p>
-                <p class="text-white">{{ session?.patientName || 'Unknown' }}</p>
+                <p class="text-white">{{ patientName || 'Unknown' }}</p>
               </div>
               <div>
                 <p class="text-sm text-gray-400 mb-1">MRN</p>
-                <p class="text-white font-mono text-sm">{{ session?.patientId || 'N/A' }}</p>
+                <p class="text-white font-mono text-sm">{{ patientId || 'N/A' }}</p>
               </div>
             </div>
 

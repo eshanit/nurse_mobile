@@ -20,10 +20,12 @@ export type SyncStatus = 'online' | 'offline' | 'syncing' | 'error';
 
 export interface ActivityItem {
   id: string;
+  sessionId?: string;  // Optional session ID for encounters
   type: 'encounter' | 'patient' | 'sync' | 'system';
   action: 'created' | 'updated' | 'finalized' | 'synced';
   title: string;
   description?: string;
+  patientCpt?: string;  // CPT of linked patient (from patientId)
   priority?: 'red' | 'yellow' | 'green';
   updated_at: string;
   synced: boolean;
@@ -248,9 +250,11 @@ export const useDashboardStore = defineStore('dashboard', () => {
         .slice(0, 10)
         .map(form => ({
           id: form._id,
+          sessionId: form.sessionId,
           type: 'encounter' as const,
           action: form.status === 'completed' ? 'finalized' as const : 'updated' as const,
           title: form.patientName || form._id,
+          patientCpt: form.patientId, // patientId holds the CPT
           priority: form.calculated?.triagePriority || 'green',
           updated_at: form.updatedAt,
           synced: form.syncStatus === 'synced'

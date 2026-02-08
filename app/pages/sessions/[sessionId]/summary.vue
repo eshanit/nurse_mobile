@@ -13,7 +13,9 @@ import { loadSession, completeSession, updateSession, type ClinicalSession } fro
 import { formEngine } from '~/services/formEngine';
 import type { ClinicalFormInstance } from '~/types/clinical-form';
 import { useToast } from '~/composables/useToast';
-import { TWButton, TWCard, TWBadge } from '~/components/ui';
+import { usePatientLookup } from '~/composables/usePatientLookup';
+import { getPatientFullName } from '~/types/patient';
+import { TWButton, TWCard, TWBadge, TWIcon, TWAlert } from '~/components/ui';
 
 // ============================================
 // Route & Params
@@ -46,6 +48,51 @@ const error = ref<string | null>(null);
 const dischargeNotes = ref('');
 const dischargeDisposition = ref<'home' | 'referred' | 'transferred' | 'deceased'>('home');
 
+// Patient state
+const linkedPatient = ref<{ cpt: string; firstName: string; lastName: string } | null>(null);
+const showPatientLookup = ref(false);
+
+// ============================================
+// Patient Lookup
+// ============================================
+
+const {
+  query: patientQuery,
+  results: patientResults,
+  selectedPatient,
+  isSearching: isSearchingPatient,
+  hasError: patientHasError,
+  setMode: setPatientMode,
+  lookupByCPT: lookupPatientByCPT,
+  selectPatient: selectPatientFromLookup,
+  clearQuery: clearPatientQuery,
+  loadRecentPatients: loadRecentPatientLookup
+} = usePatientLookup({
+  showRecent: true,
+  onSelect: (patient) => {
+    linkedPatient.value = {
+      cpt: patient.cpt,
+      firstName: patient.firstName,
+      lastName: patient.lastName
+    };
+    showPatientLookup.value = false;
+    
+    // Save patient to session
+    if (session.value) {
+      updateSession(sessionId.value, {
+        patientId: patient.cpt,
+        patientName: `${patient.firstName} ${patient.lastName}`
+      } as any);
+    }
+    
+    toastComposable.toast({
+      title: 'Patient Linked',
+      description: `${patient.firstName} ${patient.lastName} has been linked to this session`,
+      color: 'success'
+    });
+  }
+});
+
 // ============================================
 // Services
 // ============================================
@@ -60,6 +107,18 @@ const isCompleted = computed(() => session.value?.status === 'completed');
 
 const patientInfo = computed(() => {
   if (!session.value) return null;
+  
+  // Use linked patient data if available
+  if (linkedPatient.value) {
+    return {
+      name: `${linkedPatient.value.firstName} ${linkedPatient.value.lastName}`,
+      patientId: linkedPatient.value.cpt,
+      dateOfBirth: 'N/A', // Would need to load full patient record
+      gender: 'Not specified',
+      chiefComplaint: session.value.chiefComplaint || 'Not recorded'
+    };
+  }
+  
   return {
     name: session.value.patientName || 'Unknown Patient',
     patientId: session.value.patientId || 'N/A',
@@ -159,6 +218,30 @@ function formatDate(timestamp: number | string | undefined): string {
     hour: '2-digit',
     minute: '2-digit'
   });
+}
+
+// ============================================
+// Patient Lookup Functions
+// ============================================
+
+function openPatientLookup() {
+  showPatientLookup.value = true;
+  loadRecentPatientLookup();
+}
+
+function closePatientLookup() {
+  showPatientLookup.value = false;
+  clearPatientQuery();
+}
+
+async function handlePatientCPTInput() {
+  if (patientQuery.value.length === 11) {
+    await lookupPatientByCPT();
+  }
+}
+
+function registerNewPatient() {
+  navigateTo(`/sessions/${sessionId.value}/registration`);
 }
 
 // ============================================
@@ -404,8 +487,20 @@ onMounted(() => {
               Session {{ session.id?.slice(7, 11) }} • {{ sessionAge }}
             </p>
           </div>
-          <div class="text-right text-sm text-gray-400">
-            <p>{{ formattedDate }}</p>
+          <div class="flex gap-2">
+            <button
+              v-if="!linkedPatient"
+              @click="openPatientLookup"
+              class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              Link Patient
+            </button>
+            <span v-else class="px-3 py-1.5 bg-green-900/30 text-green-400 text-sm rounded-lg border border-green-700/50">
+              ✓ Patient Linked
+            </span>
           </div>
         </div>
 
@@ -710,6 +805,115 @@ onMounted(() => {
           </div>
         </div>
       </TWCard>
+    </div>
+
+    <!-- Patient Lookup Modal -->
+    <div
+      v-if="showPatientLookup"
+      class="fixed inset-0 z-50 overflow-y-auto"
+      @click.self="closePatientLookup"
+    >
+      <div class="flex min-h-full items-center justify-center p-4">
+        <div class="fixed inset-0 bg-black/60" @click="closePatientLookup"></div>
+        <div class="relative bg-gray-900 rounded-xl shadow-2xl max-w-lg w-full mx-auto">
+          <!-- Modal Header -->
+          <div class="flex items-center justify-between p-4 border-b border-gray-700">
+            <h3 class="text-lg font-semibold text-white">Link Patient to Session</h3>
+            <button
+              @click="closePatientLookup"
+              class="p-1 text-gray-400 hover:text-white transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          <!-- Modal Content -->
+          <div class="p-4">
+            <!-- Search Input -->
+            <div class="flex gap-2 mb-4">
+              <div class="relative flex-1">
+                <input
+                  v-model="patientQuery"
+                  type="text"
+                  placeholder="Enter CPT, name, or phone"
+                  class="w-full px-4 py-2.5 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  @keyup.enter="lookupPatientByCPT"
+                  @input="handlePatientCPTInput"
+                />
+                <button
+                  v-if="patientQuery"
+                  @click="clearPatientQuery"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <button
+                @click="lookupPatientByCPT"
+                :disabled="isSearchingPatient"
+                class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50"
+              >
+                <span v-if="isSearchingPatient">Searching...</span>
+                <span v-else>Search</span>
+              </button>
+            </div>
+            
+            <!-- Search by CPT Button -->
+            <div class="mb-4">
+              <button
+                @click="() => { setPatientMode('cpt'); patientQuery = ''; }"
+                class="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                </svg>
+                Enter CPT directly
+              </button>
+            </div>
+            
+            <!-- Results -->
+            <div v-if="patientResults.length > 0" class="space-y-2 max-h-64 overflow-y-auto">
+              <div
+                v-for="patient in patientResults"
+                :key="patient.cpt"
+                @click="selectPatientFromLookup(patient)"
+                class="flex items-center justify-between p-3 bg-gray-800 rounded-lg cursor-pointer hover:bg-gray-700 transition-colors"
+              >
+                <div>
+                  <p class="text-white font-medium">{{ patient.firstName }} {{ patient.lastName }}</p>
+                  <p class="text-gray-400 text-sm">{{ patient.cpt }}</p>
+                </div>
+                <button class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded transition-colors">
+                  Select
+                </button>
+              </div>
+            </div>
+            
+            <!-- No Results -->
+            <div v-else-if="patientQuery && !isSearchingPatient" class="text-center py-8">
+              <p class="text-gray-400 mb-4">No patients found</p>
+              <button
+                @click="registerNewPatient"
+                class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors"
+              >
+                Register New Patient
+              </button>
+            </div>
+            
+            <!-- Initial State -->
+            <div v-else class="text-center py-8">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-gray-500 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <p class="text-gray-400">Enter a CPT, name, or phone number to search for a patient</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
