@@ -7,10 +7,15 @@
 import { ref, computed, onMounted } from 'vue';
 import { useAuthStore } from '~/stores/auth';
 import { useSecurityStore } from '~/stores/security';
+import { useKeyManager } from '~/composables/useKeyManager';
+import { useAppInit } from '~/composables/useAppInit';
+import { logAuditEvent } from '~/services/auditLogger';
 
 export function useAuth() {
   const authStore = useAuthStore();
   const securityStore = useSecurityStore();
+  const { initializeFromPin, validateKeyForOperation } = useKeyManager();
+  const { initialize: initializeApp } = useAppInit();
 
   // Local state
   const isLoading = ref(true);
@@ -36,6 +41,12 @@ export function useAuth() {
     try {
       await authStore.initialize();
       await securityStore.initialize();
+      
+      const result = await initializeApp();
+      
+      if (result.degradedMode) {
+        console.warn('[useAuth] App initialized in degraded mode');
+      }
     } catch (error) {
       console.error('[useAuth] Initialization failed:', error);
       errorMessage.value = 'Failed to initialize authentication';
@@ -111,17 +122,39 @@ export function useAuth() {
       return false;
     }
 
-    const success = await authStore.verifyPin(pin);
+    const authSuccess = await authStore.verifyPin(pin);
     
-    if (success) {
-      // Derive encryption key from PIN
-      await securityStore.deriveKeyFromPin(pin);
-    } else {
+    if (!authSuccess) {
       const remaining = maxFailedAttempts - failedAttempts.value;
       errorMessage.value = `Incorrect PIN. ${remaining} attempts remaining.`;
+      return false;
     }
 
-    return success;
+    const keyResult = await initializeFromPin(pin);
+    
+    if (!keyResult.valid) {
+      errorMessage.value = keyResult.error || 'Failed to initialize encryption key';
+      
+      logAuditEvent(
+        'security_exception',
+        'error',
+        'useAuth',
+        { operation: 'pin_verification_key_init', error: keyResult.error },
+        'failure'
+      );
+      
+      return false;
+    }
+
+    logAuditEvent(
+      'session_start',
+      'info',
+      'useAuth',
+      { keyId: keyResult.keyId, method: 'pin' },
+      'success'
+    );
+
+    return true;
   }
 
   /**

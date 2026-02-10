@@ -242,6 +242,39 @@ export function validateCPTFormat(cpt: string): CPTValidationResult {
 }
 
 /**
+ * Validate 4-character CPT format (for rapid lookup)
+ * 
+ * @param cpt CPT string to validate
+ * @returns Validation result with isValid flag and optional error
+ */
+export function validateShortCPTFormat(cpt: string): CPTValidationResult {
+  const normalized = cpt.trim().toUpperCase().replace(/\s/g, '');
+  
+  // Check length (exactly 4 characters)
+  if (normalized.length !== 4) {
+    return { 
+      isValid: false, 
+      error: `Short CPT must be 4 characters (got ${normalized.length})` 
+    };
+  }
+  
+  // Validate each character
+  for (const char of normalized) {
+    if (!isValidCPTChar(char)) {
+      return { 
+        isValid: false, 
+        error: `Invalid character '${char}' in CPT` 
+      };
+    }
+  }
+  
+  return {
+    isValid: true,
+    formattedCPT: normalized
+  };
+}
+
+/**
  * Quick check if a string looks like a valid CPT
  */
 export function looksLikeCPT(input: string): boolean {

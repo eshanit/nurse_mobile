@@ -26,8 +26,8 @@ import {
   initializeTimeline 
 } from '~/services/clinicalTimeline';
 import { useFormEngine } from '~/composables/useFormEngine';
+import { useAssessmentNavigation } from '~/composables/useAssessmentNavigation';
 import { formEngine } from '~/services/formEngine';
-import { useToast } from '@/composables/useToast';
 import { TWButton, TWBadge, TWCard } from '~/components/ui';
 import { useSessionPatient } from '~/composables/useSessionPatient';
 
@@ -84,6 +84,11 @@ const { patientData: persistedPatient, hasPatient: hasPersistedPatient } = useSe
 });
 
 /**
+ * Assessment navigation composable for state management-based patient data passing
+ */
+const { setNavigationState } = useAssessmentNavigation();
+
+/**
  * Get the patient name - from session data first, then persisted storage
  */
 const patientName = computed(() => {
@@ -107,6 +112,35 @@ const patientId = computed(() => {
   }
   if (persistedPatient.value?.patientId) {
     return persistedPatient.value.patientId;
+  }
+  return null;
+});
+
+/**
+ * Get the patient CPT - from session data first, then persisted storage
+ * Returns the 4-character CPT for patient lookup
+ */
+const patientCpt = computed(() => {
+  // First check session data (new field)
+  if (session.value?.patientCpt) {
+    return session.value.patientCpt;
+  }
+  // Fall back to patientId if it looks like a 4-character CPT
+  if (session.value?.patientId) {
+    const pid = session.value.patientId;
+    if (pid.length === 4) {
+      return pid;
+    }
+  }
+  // Check persisted data
+  if (persistedPatient.value?.patientCpt) {
+    return persistedPatient.value.patientCpt;
+  }
+  if (persistedPatient.value?.patientId) {
+    const pid = persistedPatient.value.patientId;
+    if (pid.length === 4) {
+      return pid;
+    }
   }
   return null;
 });
@@ -729,7 +763,7 @@ async function handleAdvanceStage() {
     await logStageChange(sessionId.value, previousStage, nextStage);
     
     // Show toast notification
-    toastComposable.toast({
+    toastComposable.add({
       title: 'Stage advanced',
       description: `Session moved to ${nextStage}`,
       color: 'success'
@@ -788,37 +822,27 @@ async function handleCompleteSession(finalStatus: 'completed' | 'referred' | 'ca
 }
 
 /**
- * Open form
+ * Open form using state management (DRY principle)
  */
 async function handleOpenForm(schemaId: string) {
   try {
     isSaving.value = true;
     
-    // For peds_respiratory, navigate to the specific assessment page
-    if (schemaId === 'peds_respiratory') {
-      const queryParams = new URLSearchParams();
-      queryParams.set('sessionId', sessionId.value);
-      
-      // Add patient info if available
-      if (session.value?.patientName) {
-        queryParams.set('patientName', session.value.patientName);
+    // Set navigation state with patient data (stored in composable, not query params)
+    setNavigationState(
+      schemaId,
+      'new', // formId 'new' triggers form creation
+      sessionId.value,
+      {
+        patientId: session.value?.patientId || persistedPatient.value?.patientId,
+        patientName: session.value?.patientName || persistedPatient.value?.patientName,
+        dateOfBirth: session.value?.dateOfBirth || persistedPatient.value?.dateOfBirth,
+        gender: session.value?.gender || persistedPatient.value?.gender
       }
-      if (session.value?.patientId) {
-        queryParams.set('patientId', session.value.patientId);
-      }
-      if (session.value?.dateOfBirth) {
-        queryParams.set('dateOfBirth', session.value.dateOfBirth);
-      }
-      if (session.value?.gender) {
-        queryParams.set('gender', session.value.gender);
-      }
-      
-      navigateTo(`/assessment/peds-respiratory?${queryParams.toString()}`);
-      return;
-    }
+    );
     
-    // For other forms, use the existing route structure
-    navigateTo(`/assessment/${schemaId}/new?sessionId=${sessionId.value}`);
+    // Navigate to dynamic route
+    navigateTo(`/assessment/${schemaId}/new`);
   } catch (err) {
     console.error('Failed to open form:', err);
     error.value = err instanceof Error ? err.message : 'Failed to open form';
@@ -1057,6 +1081,20 @@ onMounted(async () => {
           <div class="bg-gray-800 rounded-xl p-6">
             <h3 class="text-xl font-semibold text-white mb-4">Patient Registration</h3>
             <p class="text-gray-400 mb-6">Registration form would be displayed here</p>
+            
+            <!-- Patient Lookup Link -->
+            <div class="mt-6 p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg">
+              <p class="text-sm text-blue-400 mb-3">Already have a patient CPT?</p>
+              <NuxtLink 
+                :to="`/sessions/${sessionId}/patient-lookup`"
+                class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                Look Up Patient by CPT
+              </NuxtLink>
+            </div>
           </div>
         </div>
         
@@ -1080,8 +1118,8 @@ onMounted(async () => {
                 <p class="text-white">{{ patientName || 'Unknown' }}</p>
               </div>
               <div>
-                <p class="text-sm text-gray-400 mb-1">MRN</p>
-                <p class="text-white font-mono text-sm">{{ patientId || 'N/A' }}</p>
+                <p class="text-sm text-gray-400 mb-1">CPT</p>
+                <p class="text-white font-mono text-sm">{{ patientCpt || 'N/A' }}</p>
               </div>
             </div>
 
@@ -1118,6 +1156,11 @@ onMounted(async () => {
             <div>
               <p class="text-sm text-gray-400 mb-1">Session ID</p>
               <p class="text-white font-mono text-sm">{{ sessionId }}</p>
+            </div>
+            
+            <div>
+              <p class="text-sm text-gray-400 mb-1">CPT</p>
+              <p class="text-white font-mono text-sm">{{ patientCpt || 'N/A' }}</p>
             </div>
             
             <div>

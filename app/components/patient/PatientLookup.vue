@@ -8,7 +8,7 @@
         </div>
         <div class="header-text">
           <h2 class="header-title">Patient Lookup</h2>
-          <p class="header-subtitle">Find patient by CPT, name, or phone</p>
+          <p class="header-subtitle">Find patient by 4-character CPT</p>
         </div>
       </div>
     </TWCard>
@@ -313,33 +313,28 @@ function handleInput(): void {
  * Handle CPT input with auto-formatting
  */
 async function handleCPTInput(): Promise<void> {
-  // Auto-uppercase and format
-  let formatted = query.value.toUpperCase();
-  formatted = formatted.replace(/[^A-Z0-9]/g, '');
-  
-  // Add dashes for CPT format
-  if (formatted.length >= 4 && formatted.length < 9) {
-    formatted = formatted.slice(0, 4) + '-' + formatted.slice(4);
+    // Auto-uppercase and remove invalid characters
+    let formatted = query.value.toUpperCase();
+    formatted = formatted.replace(/[^A-Z0-9]/g, '');
+    
+    query.value = formatted;
+    
+    // Auto-lookup when complete (4 characters)
+    if (formatted.length === 4) {
+      await lookupByCPT();
+    }
   }
-  
-  query.value = formatted;
-  
-  // Auto-lookup when complete
-  if (formatted.length === 11) { // CP-XXXX-XXXX = 11 chars
-    await lookupByCPT();
-  }
-}
 
 /**
  * Handle enter key
  */
 async function handleEnter(): Promise<void> {
-  if (mode.value === 'cpt' && query.value.length === 11) {
-    await lookupByCPT();
-  } else {
-    immediateSearch();
+    if (mode.value === 'cpt' && query.value.length === 4) {
+      await lookupByCPT();
+    } else {
+      immediateSearch();
+    }
   }
-}
 
 /**
  * Clear recent patients

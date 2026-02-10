@@ -10,7 +10,6 @@ import { ref, computed, onMounted } from 'vue';
 import type { ClinicalSession } from '~/services/sessionEngine';
 import { updateSession, advanceStage } from '~/services/sessionEngine';
 import { logStageChange, logStatusChange } from '~/services/clinicalTimeline';
-import { useToast } from '@/composables/useToast';
 
 interface Props {
   session: ClinicalSession;

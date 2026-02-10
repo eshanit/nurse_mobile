@@ -52,6 +52,7 @@ export interface ClinicalSession {
   _id: string;
   _rev?: string;
   id: string;
+  patientCpt?: string;    // 4-character CPT for patient lookup
   patientId?: string;
   patientName?: string;
   dateOfBirth?: string;

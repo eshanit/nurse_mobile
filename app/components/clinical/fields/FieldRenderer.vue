@@ -275,8 +275,16 @@ function handleBlur(event: FocusEvent) {
     />
 
     <!-- Calculated Field (read-only) -->
-    <div v-else-if="fieldType === 'calculated'" class="text-sm font-medium text-gray-300 p-2 bg-gray-800 rounded">
-      {{ modelValue || '-' }}
+    <div v-else-if="fieldType === 'calculated'" class="text-sm font-medium text-gray-300 p-3 bg-gray-800 rounded">
+      <template v-if="Array.isArray(modelValue)">
+        <ul v-if="modelValue.length" class="list-disc list-inside space-y-1">
+          <li v-for="(item, idx) in modelValue" :key="idx">{{ item }}</li>
+        </ul>
+        <span v-else>-</span>
+      </template>
+      <template v-else>
+        {{ modelValue || '-' }}
+      </template>
     </div>
 
     <!-- Fallback for unknown types -->

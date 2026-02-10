@@ -310,7 +310,13 @@ class ClinicalFormEngine {
     instance.calculated = {
       ...instance.calculated,
       ...calculatedUpdates,
+      // Store with both snake_case (for schema field IDs) and camelCase (for backward compatibility)
+      triage_priority: triageResult.priority,
       triagePriority: triageResult.priority,
+      triage_classification: triageResult.classification,
+      triageClassification: triageResult.classification,
+      triage_actions: triageResult.actions,
+      triageActions: triageResult.actions,
     };
 
     // Get validation warnings
@@ -581,7 +587,13 @@ class ClinicalFormEngine {
       const triageResult = await this.runTriageLogic(formId);
       instance.calculated = {
         ...instance.calculated,
+        // Store with both snake_case (for schema field IDs) and camelCase (for backward compatibility)
+        triage_priority: triageResult.priority,
         triagePriority: triageResult.priority,
+        triage_classification: triageResult.classification,
+        triageClassification: triageResult.classification,
+        triage_actions: triageResult.actions,
+        triageActions: triageResult.actions,
       };
     }
 

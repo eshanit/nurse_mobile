@@ -20,6 +20,7 @@ import {
   deleteSecureDb 
 } from '~/services/secureDb';
 import { encryptData, decryptData } from '~/services/encryptionUtils';
+import { logAuditEvent, logEncryption, logKeyManagement } from '~/services/auditLogger';
 
 export interface EncryptionKey {
   key: Uint8Array;
@@ -178,6 +179,12 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
 
     console.log('[Security] Key derived successfully. Length:', encryptionKey.value.length);
 
+    // Log key derivation
+    logKeyManagement('key_derivation', true, {
+      method: 'pin',
+      keyLength: encryptionKey.value.length
+    });
+
     // Backup encrypted with device secret
     const deviceSecret = await getDeviceSecret();
     if (deviceSecret && encryptionKey.value) {
@@ -198,6 +205,10 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
         code: err.code
       });
     }
+    
+    logKeyManagement('key_derivation', false, {
+      error: String(err)
+    });
     
     return false;
   }
@@ -509,8 +520,13 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
     
     console.log('[Security] Database locked');
     
-    const authStore = useAuthStore();
-    authStore.logAction('lock', true, 'Database locked');
+    logAuditEvent(
+      'session_end',
+      'info',
+      'securityStore',
+      { operation: 'lock' },
+      'success'
+    );
   }
 
   /**
@@ -534,8 +550,13 @@ async function deriveKeyFromPin(pin: string): Promise<boolean> {
 
     console.log('[Security] Factory reset complete');
     
-    const authStore = useAuthStore();
-    authStore.logAction('security_reset', true, 'Security data factory reset');
+    logAuditEvent(
+      'configuration_change',
+      'warning',
+      'securityStore',
+      { operation: 'factory_reset' },
+      'success'
+    );
   }
 
   /**

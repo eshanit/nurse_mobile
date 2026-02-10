@@ -137,7 +137,8 @@
       "id": "triage",
       "title": "Triage & Classification",
       "description": "Classification based on assessment findings",
-      "fields": []
+      "icon": "🎯",
+      "fields": ["triage_priority", "triage_classification", "triage_actions"]
     }
   ],
   "fields": [
@@ -346,6 +347,31 @@
       "id": "runny_nose",
       "type": "checkbox",
       "label": "Runny nose"
+    },
+    {
+      "id": "triage_priority",
+      "type": "calculated",
+      "label": "Triage Priority",
+      "clinicalNote": "Auto-calculated based on IMCI classification",
+      "config": {
+        "options": [
+          { "value": "red", "label": "RED - Urgent", "color": "#dc2626" },
+          { "value": "yellow", "label": "YELLOW - Priority", "color": "#f59e0b" },
+          { "value": "green", "label": "GREEN - Routine", "color": "#22c55e" }
+        ]
+      }
+    },
+    {
+      "id": "triage_classification",
+      "type": "calculated",
+      "label": "Classification",
+      "clinicalNote": "Based on assessment findings per WHO IMCI"
+    },
+    {
+      "id": "triage_actions",
+      "type": "calculated",
+      "label": "Recommended Actions",
+      "clinicalNote": "Follow IMCI treatment guidelines"
     }
   ],
   "calculations": [

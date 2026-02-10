@@ -13,7 +13,8 @@
  */
 
 import { ref } from 'vue';
-import { generateCPT, validateCPTFormat } from './patientId';
+import { generateCPT, validateCPTFormat, validateShortCPTFormat } from './patientId';
+import { generateUniqueCpt } from './cptService';
 import type {
   ClinicalPatient,
   PatientDocument,
@@ -27,8 +28,8 @@ import type {
 } from '~/types/patient';
 import { securePut, secureGet, secureFind } from './secureDb';
 import { useSecurityStore } from '~/stores/security';
-import { useToast } from '~/composables/useToast';
 import type { ClinicalSession } from '~/types/clinical-session';
+import { generateCpt as generateShortCpt, isValidCpt } from './cptService';
 
 // ============================================
 // State
@@ -119,8 +120,17 @@ export async function registerPatient(
     throw new Error('Last name is required');
   }
   
-  // Generate unique CPT
-  const cpt = generateCPT();
+  // Generate unique 4-character CPT
+  const cpt = await generateUniqueCpt(async (candidate: string) => {
+    // Check if CPT already exists
+    const docId = getPatientDocId(candidate);
+    try {
+      const existing = await secureGet<PatientDocument>(docId, key);
+      return !!existing;
+    } catch {
+      return false;
+    }
+  });
   const now = new Date().toISOString();
   
   // Create patient record
@@ -159,7 +169,7 @@ export async function registerPatient(
   console.log(`[PatientEngine] Registered patient: ${cpt}`);
   
   // Show success toast
-  toast.toast({
+  toast.add({
     title: 'Patient Registered',
     description: `CPT: ${cpt}`,
     color: 'success'
@@ -169,7 +179,7 @@ export async function registerPatient(
 }
 
 /**
- * Find patient by CPT
+ * Find patient by CPT (supports both 4-char and 11-char formats)
  * 
  * @param cpt Clinical Patient Token
  * @returns Lookup result with patient if found
@@ -177,7 +187,42 @@ export async function registerPatient(
 export async function getPatientByCPT(cpt: string): Promise<PatientLookupResult> {
   const key = await getEncryptionKey();
   
-  // Validate CPT format
+  // Try 4-character format first
+  const shortValidation = validateShortCPTFormat(cpt);
+  if (shortValidation.isValid) {
+    const normalizedCPT = shortValidation.formattedCPT!;
+    
+    // Check cache first
+    if (patientCache.value.has(normalizedCPT)) {
+      return { 
+        found: true, 
+        patient: patientCache.value.get(normalizedCPT)! 
+      };
+    }
+    
+    // Lookup in secureDb
+    try {
+      const document = await secureGet<PatientDocument>(
+        getPatientDocId(normalizedCPT),
+        key
+      );
+      
+      if (!document) {
+        return { found: false, error: 'Patient not found' };
+      }
+      
+      const patient = extractPatient(document);
+      patientCache.value.set(normalizedCPT, patient);
+      
+      return { found: true, patient };
+      
+    } catch (error) {
+      console.error('[PatientEngine] Lookup failed:', error);
+      return { found: false, error: 'Failed to retrieve patient' };
+    }
+  }
+  
+  // Fall back to 11-character format
   const validation = validateCPTFormat(cpt);
   if (!validation.isValid) {
     return { found: false, error: validation.error };
@@ -205,8 +250,6 @@ export async function getPatientByCPT(cpt: string): Promise<PatientLookupResult>
     }
     
     const patient = extractPatient(document);
-    
-    // Update cache
     patientCache.value.set(normalizedCPT, patient);
     
     return { found: true, patient };

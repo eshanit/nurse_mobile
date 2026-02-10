@@ -9,12 +9,16 @@
 
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, navigateTo } from '#app';
-import { useToast } from '~/composables/useToast';
 import { loadSession, updateSession } from '~/services/sessionEngine';
 import type { ClinicalSession } from '~/services/sessionEngine';
 import { bridgeAssessmentToTreatment } from '~/services/treatmentBridge';
 import { formEngine } from '~/services/formEngine';
 import type { ClinicalFormInstance } from '~/types/clinical-form';
+import { useAIStore } from '~/stores/aiStore';
+import { isAIEnabled, getAIConfig } from '~/services/aiConfig';
+import { buildExplainabilityModel } from '~/services/explainabilityEngine';
+import { askClinicalAI } from '~/services/clinicalAI';
+import type { ExplainabilityRecord } from '~/types/explainability';
 
 // ============================================
 // Types & Interfaces
@@ -104,6 +108,15 @@ const activeSection = ref(0);
 const formValues = ref<Record<string, any>>({});
 const fieldErrors = ref<Record<string, string>>({});
 const assessmentStatus = ref<'pending' | 'completed' | 'not_found'>('pending');
+
+// ============================================
+// AI State
+// ============================================
+
+const aiStore = useAIStore();
+const caregiverEducation = ref('');
+const isGeneratingEducation = ref(false);
+const explainabilityRecord = ref<ExplainabilityRecord | null>(null);
 
 // ============================================
 // Services
@@ -470,6 +483,58 @@ async function loadSessionData() {
 }
 
 // ============================================
+// AI Methods
+// ============================================
+
+async function buildExplainabilityFromAssessment() {
+  if (!isAIEnabled('CARE_EDUCATION')) {
+    explainabilityRecord.value = null;
+    return;
+  }
+
+  try {
+    const assessment = await formEngine.getLatestInstanceBySession({
+      schemaId: 'peds_respiratory',
+      sessionId: sessionId.value
+    });
+
+    if (assessment && assessment.status === 'completed') {
+      const config = getAIConfig();
+      const record = await buildExplainabilityModel(assessment, {
+        sessionId: sessionId.value,
+        useAI: config.enabled
+      });
+      explainabilityRecord.value = record;
+    }
+  } catch (err) {
+    console.warn('[Treatment] Could not build explainability:', err);
+    explainabilityRecord.value = null;
+  }
+}
+
+async function generateCaregiverEducation() {
+  if (!explainabilityRecord.value) return;
+
+  isGeneratingEducation.value = true;
+  caregiverEducation.value = '';
+
+  try {
+    const response = await askClinicalAI('CARE_EDUCATION', explainabilityRecord.value);
+
+    caregiverEducation.value = response;
+  } catch (err) {
+    console.error('[Treatment] Failed to generate caregiver education:', err);
+    toastComposable.add({
+      title: 'AI Error',
+      description: 'Failed to generate caregiver education. Please try again.',
+      color: 'error'
+    });
+  } finally {
+    isGeneratingEducation.value = false;
+  }
+}
+
+// ============================================
 // Form Actions
 // ============================================
 
@@ -506,10 +571,10 @@ async function saveTreatmentData(): Promise<void> {
       notes: JSON.stringify(treatmentNotes)
     } as any);
     
-    toastComposable.toast({ title: 'Treatment saved successfully', color: 'success' });
+    toastComposable.add({ title: 'Treatment saved successfully', color: 'success' });
   } catch (err) {
     console.error('[Treatment] Failed to save:', err);
-    toastComposable.toast({ title: 'Failed to save treatment data', color: 'error' });
+    toastComposable.add({ title: 'Failed to save treatment data', color: 'error' });
   } finally {
     isSaving.value = false;
   }
@@ -521,7 +586,7 @@ async function completeTreatment(): Promise<void> {
     
     // Validate all sections
     if (!validateAllSections()) {
-      toastComposable.toast({ title: 'Please fill in all required fields', color: 'warning' });
+      toastComposable.add({ title: 'Please fill in all required fields', color: 'warning' });
       isSaving.value = false;
       return;
     }
@@ -558,11 +623,11 @@ async function completeTreatment(): Promise<void> {
       notes: JSON.stringify(treatmentNotes)
     } as any);
     
-    toastComposable.toast({ title: 'Treatment completed successfully', color: 'success' });
+    toastComposable.add({ title: 'Treatment completed successfully', color: 'success' });
     navigateTo(`/sessions/${sessionId.value}/summary`);
   } catch (err) {
     console.error('[Treatment] Failed to complete:', err);
-    toastComposable.toast({ title: 'Failed to complete treatment', color: 'error' });
+    toastComposable.add({ title: 'Failed to complete treatment', color: 'error' });
   } finally {
     isSaving.value = false;
   }
@@ -622,8 +687,9 @@ watch(formValues, () => {
 // Lifecycle
 // ============================================
 
-onMounted(() => {
-  loadSessionData();
+onMounted(async () => {
+  await loadSessionData();
+  await buildExplainabilityFromAssessment();
 });
 </script>
 
@@ -826,6 +892,54 @@ onMounted(() => {
             {{ session.patientId }}
           </span>
         </div>
+      </div>
+    </div>
+
+    <!-- AI Caregiver Education Panel -->
+    <div v-if="isAIEnabled('CARE_EDUCATION') && explainabilityRecord" class="bg-blue-900/20 border border-blue-700/50 rounded-xl p-6 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-white flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+          Caregiver Education
+        </h3>
+        <button
+          v-if="!caregiverEducation && !isGeneratingEducation"
+          @click="generateCaregiverEducation"
+          class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Generate Explanation
+        </button>
+      </div>
+      
+      <!-- Loading State -->
+      <div v-if="isGeneratingEducation" class="flex items-center gap-3 text-gray-400">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <span>Generating plain-language explanation...</span>
+      </div>
+      
+      <!-- Generated Content -->
+      <div v-else-if="caregiverEducation" class="space-y-3">
+        <div class="bg-gray-800/50 rounded-lg p-4 text-gray-300 text-sm leading-relaxed">
+          {{ caregiverEducation }}
+        </div>
+        <p class="text-xs text-gray-500 flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          AI-generated. Please review for accuracy before sharing with caregivers.
+        </p>
+      </div>
+      
+      <!-- Placeholder -->
+      <div v-else class="text-gray-400 text-sm">
+        <p>Generate a plain-language explanation of the patient's condition and treatment plan for caregivers.</p>
       </div>
     </div>
 

@@ -21,6 +21,7 @@ import type { ClinicalPatient } from '~/types/patient';
  */
 export interface SessionPatientData {
   patientId: string;
+  patientCpt?: string;  // 4-character CPT for patient lookup
   patientName: string;
   dateOfBirth?: string;
   gender?: string;
@@ -176,6 +177,7 @@ export function useSessionPatient(
         const fullName = `${defaultPatient.firstName} ${defaultPatient.lastName}`.trim();
         patientData.value = {
           patientId: defaultPatient.cpt,
+          patientCpt: defaultPatient.cpt,
           patientName: fullName,
           dateOfBirth: defaultPatient.dateOfBirth,
           gender: defaultPatient.gender,
@@ -199,6 +201,7 @@ export function useSessionPatient(
     
     const data: SessionPatientData = {
       patientId: patient.cpt,
+      patientCpt: patient.cpt,
       patientName: fullName,
       dateOfBirth: patient.dateOfBirth,
       gender: patient.gender,
@@ -280,6 +283,7 @@ export function setSessionPatient(
     const fullName = `${patient.firstName} ${patient.lastName}`.trim();
     const data: SessionPatientData = {
       patientId: patient.cpt,
+      patientCpt: patient.cpt,
       patientName: fullName,
       dateOfBirth: patient.dateOfBirth,
       gender: patient.gender,

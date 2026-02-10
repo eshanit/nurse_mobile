@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { format } from 'date-fns';
+import { format, differenceInMonths, parseISO } from 'date-fns';
 import { useSecurityStore } from '@/stores/security';
 import { secureGet } from '~/services/secureDb';
 import type { ClinicalFormInstance } from '~/types/clinical-form';
@@ -27,6 +27,17 @@ const pageTitle = computed(() => {
 const answerEntries = computed(() => {
   if (!record.value?.answers) return [];
   return Object.entries(record.value.answers);
+});
+
+// Calculate age in months from DOB
+const patientAgeMonths = computed(() => {
+  if (!record.value?.answers?.patient_dob) return null;
+  try {
+    const dob = parseISO(record.value.answers.patient_dob);
+    return differenceInMonths(new Date(), dob);
+  } catch {
+    return null;
+  }
 });
 
 function formatAnswerValue(value: any): string {
@@ -225,15 +236,17 @@ onMounted(() => {
         <div class="space-y-3">
           <div class="flex justify-between">
             <span class="text-gray-400">Patient ID</span>
-            <span class="text-white">{{ record.answers?.patient_id || 'Not recorded' }}</span>
+            <span class="text-white">{{ record.answers?.patient_id || record.patientId || 'Not recorded' }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">Patient Name</span>
-            <span class="text-white">{{ record.patientName || 'Not recorded' }}</span>
+            <span class="text-white">{{ record.answers?.patient_name || record.patientName || 'Not recorded' }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">Age (months)</span>
-            <span class="text-white">{{ record.patientAgeMonths || 'Not recorded' }}</span>
+            <span class="text-white">
+              {{ patientAgeMonths !== null ? patientAgeMonths + ' months' : (record.answers?.patient_age_months || record.patientAgeMonths || 'Not recorded') }}
+            </span>
           </div>
         </div>
       </div>
@@ -244,7 +257,7 @@ onMounted(() => {
         <div class="space-y-3">
           <div class="flex justify-between">
             <span class="text-gray-400">Assessment Type</span>
-            <span class="text-white capitalize">{{ record.schemaId.replace(/-/g, ' ') }}</span>
+            <span class="text-white capitalize">{{ record.schemaId?.replace(/-/g, ' ') || 'Unknown' }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">Current Step</span>

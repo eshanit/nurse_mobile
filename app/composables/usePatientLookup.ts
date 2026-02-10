@@ -15,12 +15,12 @@
 import { ref, computed, watch } from 'vue';
 import { useRouter, useRoute } from '#app';
 import { getPatientByCPT, searchPatients, getRecentPatients } from '~/services/patientEngine';
+import { isValidCpt, normalizeCpt } from '~/services/cptService';
 import type {
   ClinicalPatient,
   PatientLookupResult,
   PatientSearchCriteria
 } from '~/types/patient';
-import { useToast } from '~/composables/useToast';
 import { setSessionPatient } from '~/composables/useSessionPatient';
 
 // ============================================
@@ -124,7 +124,7 @@ export function usePatientLookup(config: LookupConfig = {}) {
     
     switch (mode.value) {
       case 'cpt':
-        return q.length >= 11; // CP-XXXX-XXXX
+        return q.length === 4 && isValidCpt(q); // 4-character CPT
       case 'name':
         return q.length >= 2;
       case 'phone':
@@ -155,7 +155,7 @@ export function usePatientLookup(config: LookupConfig = {}) {
   const queryHint = computed(() => {
     switch (mode.value) {
       case 'cpt':
-        return 'Enter CPT (e.g., CP-XXXX-XXXX)';
+        return 'Enter CPT (4 characters)';
       case 'name':
         return 'Enter at least 2 characters';
       case 'phone':
@@ -269,9 +269,12 @@ export function usePatientLookup(config: LookupConfig = {}) {
   async function handleCPTInput(): Promise<void> {
     const normalized = query.value.toUpperCase().replace(/\s/g, '');
     
-    // Check if valid CPT format
-    if (normalized.match(/^CP-\w{4}-\w{4}$/)) {
-      query.value = normalized;
+    // Remove dashes if present (for backward compatibility)
+    const cleanCpt = normalized.replace(/-/g, '');
+    
+    // Check if valid 4-character CPT format
+    if (isValidCpt(cleanCpt)) {
+      query.value = cleanCpt;
       await lookupByCPT();
     }
   }
@@ -315,7 +318,7 @@ export function usePatientLookup(config: LookupConfig = {}) {
       
       // Show toast if no results
       if (results.value.length === 0) {
-        toast.toast({
+        toast.add({
           title: 'No Results',
           description: 'No patients found matching your search',
           color: 'info'
@@ -374,7 +377,7 @@ export function usePatientLookup(config: LookupConfig = {}) {
       config.onSelect(patient);
     }
     
-    toast.toast({
+    toast.add({
       title: 'Patient Selected',
       description: `${patient.firstName} ${patient.lastName}`,
       color: 'success'
@@ -434,7 +437,23 @@ export function usePatientLookup(config: LookupConfig = {}) {
     } else if (sessionId.value) {
       router.push(`/sessions/${sessionId.value}/registration`);
     } else {
-      router.push('/registration');
+      // No sessionId - create a new session and navigate to patient lookup
+      createSessionAndNavigate();
+    }
+  }
+
+  /**
+   * Create a new session and navigate to patient lookup
+   * Patient lookup is session-bound, so we need a session context
+   */
+  async function createSessionAndNavigate(): Promise<void> {
+    try {
+      const { createSession } = await import('~/services/sessionEngine');
+      const session = await createSession();
+      router.push(`/sessions/${session.id}/patient-lookup`);
+    } catch (error) {
+      console.error('Failed to create session:', error);
+      router.push('/sessions');
     }
   }
   
@@ -450,7 +469,7 @@ export function usePatientLookup(config: LookupConfig = {}) {
    */
   async function linkToSession(patient: ClinicalPatient): Promise<void> {
     if (!sessionId.value) {
-      toast.toast({
+      toast.add({
         title: 'Error',
         description: 'No active session',
         color: 'error'
@@ -464,7 +483,7 @@ export function usePatientLookup(config: LookupConfig = {}) {
     const { linkPatientToSession } = await import('~/services/patientEngine');
     await linkPatientToSession(sessionId.value, patient.cpt);
     
-    toast.toast({
+    toast.add({
       title: 'Patient Linked',
       description: `${patient.firstName} ${patient.lastName} linked to session`,
       color: 'success'

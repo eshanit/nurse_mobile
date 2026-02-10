@@ -1,14 +1,20 @@
 /**
- * Triage → Treatment Bridge Service
+ * Treatment Bridge Service
  * 
- * Implements the bridge logic for populating treatment forms
- * based on assessment triage results.
+ * Implements the Triage → Treatment Bridge Logic per specs/triage-to-treatment-bridge.md
  * 
- * Based on docs/specs/triage-to-treatment-bridge.md
+ * When a clinical assessment form is completed and triage is calculated, this service:
+ * 1. Determines the patient's triage priority
+ * 2. Identifies the matched triage rule
+ * 3. Automatically creates or updates a treatment form
+ * 4. Pre-populates recommended_actions based on WHO IMCI rules
+ * 5. Locks the actions from manual editing (read-only)
+ * 
+ * This logic is deterministic and NOT AI-driven.
  */
 
-import { formEngine } from './formEngine';
-import { linkFormToSession } from './sessionEngine';
+import { formEngine } from '~/services/formEngine';
+import { linkFormToSession, advanceStage } from '~/services/sessionEngine';
 import type { ClinicalFormInstance, TriagePriority } from '~/types/clinical-form';
 
 // ============================================
@@ -36,109 +42,160 @@ export const IMCI_TREATMENT_MAP: Record<string, string[]> = {
 };
 
 // ============================================
-// Bridge Function
+// Types
 // ============================================
 
-export interface BridgeAssessmentToTreatmentOptions {
+export interface BridgeInput {
   sessionId: string;
   assessmentInstance: ClinicalFormInstance;
 }
 
 export interface BridgeResult {
   success: boolean;
-  treatmentForm?: ClinicalFormInstance;
+  treatmentFormId?: string;
   error?: string;
 }
 
+// ============================================
+// Bridge Function
+// ============================================
+
 /**
- * Bridge assessment triage results to treatment form
+ * Bridge assessment data to treatment form.
  * 
- * This function:
- * 1. Extracts triage priority and matched rule from assessment
- * 2. Determines recommended actions (from rule or IMCI fallback)
- * 3. Creates or loads treatment form
- * 4. Populates triage_priority (in calculated) and recommended_actions (in answers)
- * 5. Links the form to the session
+ * Trigger: assessment form marked complete OR session stage moves to "treatment"
+ * 
+ * Failure handling:
+ * - No triage → blocks treatment (returns error)
+ * - No rule → falls back to IMCI_TREATMENT_MAP
+ * - No actions → throws error + returns error result
+ * - Form exists → updates instead of recreating
  */
 export async function bridgeAssessmentToTreatment(
-  options: BridgeAssessmentToTreatmentOptions
+  input: BridgeInput
 ): Promise<BridgeResult> {
-  const { sessionId, assessmentInstance } = options;
-  
-  const triagePriority = assessmentInstance.calculated?.triagePriority as TriagePriority | undefined;
-  const matchedTriageRule = assessmentInstance.calculated?.matchedTriageRule as { id: string; priority: string; actions: string[] } | undefined;
-  
-  // Validate triage result exists
+  const { sessionId, assessmentInstance } = input;
+
+  console.log('[TreatmentBridge] Starting bridge for session:', sessionId);
+
+  // ── Step 1: Extract triage data from assessment ──────────────────────
+  const triagePriority: string | undefined =
+    assessmentInstance.calculated?.triagePriority ||
+    assessmentInstance.calculated?.triage_priority ||
+    assessmentInstance.answers?.triage_priority;
+
   if (!triagePriority) {
-    console.error('[TreatmentBridge] No triage result in assessment instance');
-    return { success: false, error: 'No triage result' };
+    console.error('[TreatmentBridge] No triage result found in assessment');
+    return {
+      success: false,
+      error: 'No triage result. Cannot proceed to treatment.'
+    };
   }
-  
-  // Determine recommended actions
-  const actions = matchedTriageRule?.actions ?? IMCI_TREATMENT_MAP[triagePriority];
-  
+
+  // ── Step 2: Resolve recommended actions ──────────────────────────────
+  // Prefer matched triage rule actions, fall back to IMCI map
+  const matchedTriageRule = assessmentInstance.calculated?.matchedTriageRule as
+    | { id: string; priority: string; actions: string[] }
+    | undefined;
+
+  const triageActions: string[] | undefined =
+    assessmentInstance.calculated?.triageActions ||
+    assessmentInstance.calculated?.triage_actions;
+
+  const actions: string[] =
+    matchedTriageRule?.actions ??
+    triageActions ??
+    IMCI_TREATMENT_MAP[triagePriority] ??
+    [];
+
   if (!actions || actions.length === 0) {
-    console.error('[TreatmentBridge] No recommended actions resolved', { triagePriority, matchedTriageRule });
-    return { success: false, error: 'No recommended actions resolved' };
+    console.error('[TreatmentBridge] No recommended actions resolved for priority:', triagePriority);
+    return {
+      success: false,
+      error: 'No recommended actions resolved for triage priority: ' + triagePriority
+    };
   }
-  
-  console.log('[TreatmentBridge] Bridging assessment to treatment', {
-    sessionId,
-    triagePriority,
-    actions,
-    source: matchedTriageRule ? 'matched_rule' : 'imci_fallback'
-  });
-  
+
+  console.log('[TreatmentBridge] Resolved actions:', actions, 'for priority:', triagePriority);
+
+  // ── Step 3: Create or load treatment form ────────────────────────────
+  let treatmentInstance: ClinicalFormInstance;
+
   try {
-    // Step 1: Create or load treatment form
-    const treatmentForm = await formEngine.getOrCreateInstance({
-      workflow: 'peds_respiratory_treatment',
+    // Check if a treatment form already exists for this session
+    const existing = await formEngine.getLatestInstanceBySession({
+      schemaId: 'peds_respiratory_treatment',
       sessionId
     });
 
-    console.log('[Bridge] BEFORE update answers:', treatmentForm.answers);
+    if (existing) {
+      console.log('[TreatmentBridge] Found existing treatment form:', existing._id);
+      treatmentInstance = existing;
+    } else {
+      console.log('[TreatmentBridge] Creating new treatment form for session:', sessionId);
+      treatmentInstance = await formEngine.getOrCreateInstance({
+        workflow: 'peds_respiratory_treatment',
+        sessionId
+      });
+    }
+  } catch (err) {
+    console.error('[TreatmentBridge] Failed to get/create treatment form:', err);
+    return {
+      success: false,
+      error: 'Failed to create treatment form: ' + (err instanceof Error ? err.message : String(err))
+    };
+  }
 
-    
-    // Step 2: Inject triage + actions into calculated and answers
-    await formEngine.updateInstance(treatmentForm._id, {
+  // ── Step 4: Inject triage + actions into treatment form ──────────────
+  try {
+    await formEngine.updateInstance(treatmentInstance._id, {
       answers: {
-        ...(treatmentForm.answers || {}),
+        ...treatmentInstance.answers,
         triage_priority: triagePriority,
-        recommended_actions: actions
+        recommended_actions: actions,
+        source: 'imci_rule_engine',
+        locked: true
       },
       calculated: {
-        ...(treatmentForm.calculated || {}),
-        triagePriority: triagePriority
+        ...treatmentInstance.calculated,
+        triagePriority: triagePriority as TriagePriority,
+        recommended_actions: actions,
+        source: 'imci_rule_engine',
+        locked: true
       }
     });
 
-    console.log('[TreatmentBridge] Treatment form updated', {
-      formId: treatmentForm._id,
-      triagePriority,
-      actions
-    });
-    
-    // Step 3: Link form to session
-    await linkFormToSession(sessionId, treatmentForm._id);
-    
-    console.log('[TreatmentBridge] Treatment form linked to session', {
-      sessionId,
-      formId: treatmentForm._id
-    });
-    
-    // Reload to get updated instance
-    const updatedTreatmentForm = await formEngine.loadInstance(treatmentForm._id);
-    
-    return {
-      success: true,
-      treatmentForm: updatedTreatmentForm
-    };
-    
-  } catch (error) {
-    console.error('[TreatmentBridge] Failed to bridge assessment to treatment:', error);
+    console.log('[TreatmentBridge] Injected triage data into treatment form:', treatmentInstance._id);
+  } catch (err) {
+    console.error('[TreatmentBridge] Failed to update treatment form:', err);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to bridge assessment to treatment'
+      error: 'Failed to update treatment form: ' + (err instanceof Error ? err.message : String(err))
     };
   }
+
+  // ── Step 5: Link form to session ─────────────────────────────────────
+  try {
+    await linkFormToSession(sessionId, treatmentInstance._id);
+    console.log('[TreatmentBridge] Linked treatment form to session');
+  } catch (err) {
+    // Non-fatal: form was created but linking failed
+    console.warn('[TreatmentBridge] Failed to link form to session (non-fatal):', err);
+  }
+
+  // ── Step 6: Advance session stage to treatment ───────────────────────
+  try {
+    await advanceStage(sessionId, 'treatment');
+    console.log('[TreatmentBridge] Advanced session stage to treatment');
+  } catch (err) {
+    // Non-fatal: bridge succeeded but stage advance failed
+    console.warn('[TreatmentBridge] Failed to advance session stage (non-fatal):', err);
+  }
+
+  console.log('[TreatmentBridge] Bridge completed successfully');
+
+  return {
+    success: true,
+    treatmentFormId: treatmentInstance._id
+  };
 }

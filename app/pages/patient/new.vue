@@ -4,9 +4,9 @@ import { useRouter, useRoute } from '#app';
 import { usePatientRegistration } from '~/composables/usePatientRegistration';
 import { generateCPT } from '~/services/patientId';
 import { registerPatient, linkPatientToSession } from '~/services/patientEngine';
-import { createSession } from '~/services/sessionEngine';
+import { createSession, updateSession } from '~/services/sessionEngine';
+import { setSessionPatient } from '~/composables/useSessionPatient';
 import type { PatientRegistrationData } from '~/types/patient';
-import { useToast } from '~/composables/useToast';
 
 // ============================================
 // Configuration
@@ -21,7 +21,7 @@ const AUTO_SESSION_ENABLED = true;
 
 const router = useRouter();
 const route = useRoute();
-const { toast } = useToast();
+const toast = useToast();
 
 // Loading states
 const isRegistering = ref(false);
@@ -69,7 +69,22 @@ function goBack() {
 }
 
 function goToLookup() {
-  router.push('/patient/lookup');
+  // Create a new session first, then navigate to patient lookup within it
+  createSessionAndNavigate();
+}
+
+/**
+ * Create a new session and navigate to patient lookup
+ * Patient lookup is session-bound, so we need a session context
+ */
+async function createSessionAndNavigate(): Promise<void> {
+  try {
+    const session = await createSession();
+    router.push(`/sessions/${session.id}/patient-lookup`);
+  } catch (error) {
+    console.error('Failed to create session:', error);
+    router.push('/sessions');
+  }
 }
 
 // ============================================
@@ -82,7 +97,7 @@ async function createSessionForPatient(cpt: string): Promise<string | null> {
   
   try {
     const session = await createSession(cpt);
-    toast({
+    toast.add({
       title: 'Session Created',
       description: 'Redirecting to patient session...',
       color: 'success'
@@ -147,12 +162,24 @@ async function handleSubmit() {
       const sessionId = await createSessionForPatient(patient.cpt);
       
       if (sessionId) {
+        // Save patient data to sessionStorage for persistence
+        setSessionPatient(sessionId, patient);
+        
+        // Update session with patientName for display
+        const patientFullName = `${patient.firstName} ${patient.lastName}`.trim();
+        await updateSession(sessionId, {
+          patientId: patient.cpt,
+          patientName: patientFullName,
+          dateOfBirth: patient.dateOfBirth,
+          gender: patient.gender
+        });
+        
         // Success - navigate to session
         router.push(`/sessions/${sessionId}`);
       } else {
         // Session creation failed but registration succeeded
         // Show error with retry options
-        toast({
+        toast.add({
           title: 'Registration Complete',
           description: `Patient ${patient.cpt} registered. Session creation failed.`,
           color: 'warning'
@@ -160,7 +187,7 @@ async function handleSubmit() {
       }
     } else {
       // Auto-session disabled - navigate to patient profile
-      toast({
+      toast.add({
         title: 'Patient Registered',
         description: `Patient created with CPT: ${patient.cpt}`,
         color: 'success'
@@ -175,7 +202,7 @@ async function handleSubmit() {
     const message = error instanceof Error ? error.message : 'Registration failed';
     errors.value.general = message;
     
-    toast({
+    toast.add({
       title: 'Registration Failed',
       description: message,
       color: 'error'

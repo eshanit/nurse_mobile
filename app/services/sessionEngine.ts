@@ -45,6 +45,7 @@ export interface ClinicalSession {
   _id: string;
   _rev?: string;
   id: string;
+  patientCpt?: string;    // 4-character CPT for patient lookup
   patientId?: string;
   patientName?: string;
   dateOfBirth?: string;
@@ -428,6 +429,7 @@ export async function getSessionStats(): Promise<{
 export async function updateSession(
   sessionId: string,
   data: {
+    patientCpt?: string;
     patientId?: string;
     patientName?: string;
     dateOfBirth?: string;
@@ -444,6 +446,9 @@ export async function updateSession(
   }
   
   // Update fields
+  if (data.patientCpt !== undefined) {
+    session.patientCpt = data.patientCpt;
+  }
   if (data.patientId !== undefined) {
     session.patientId = data.patientId;
   }

@@ -24,7 +24,7 @@ import type {
   EmergencyContact,
   InsuranceInfo
 } from '~/types/patient';
-import { useToast } from '~/composables/useToast';
+import { useToast } from '#imports';
 import { setSessionPatient } from '~/composables/useSessionPatient';
 
 // ============================================
@@ -278,7 +278,7 @@ export function usePatientRegistration() {
       previewCPT.value = generateCPT();
     } catch (error) {
       console.error('Failed to generate CPT:', error);
-      toast.toast({
+      toast.add({
         title: 'Error',
         description: 'Failed to generate patient ID',
         color: 'error'
@@ -362,7 +362,7 @@ export function usePatientRegistration() {
   }> {
     // Validate form
     if (!validateAll()) {
-      toast.toast({
+      toast.add({
         title: 'Validation Error',
         description: 'Please fix the errors above',
         color: 'warning'
@@ -377,7 +377,7 @@ export function usePatientRegistration() {
       // Check for existing patient
       const exists = await checkForExistingPatient();
       if (exists && existingPatient.value) {
-        toast.toast({
+        toast.add({
           title: 'Patient Exists',
           description: `This patient already has CPT: ${existingPatient.value.cpt}`,
           color: 'warning'
@@ -407,7 +407,7 @@ export function usePatientRegistration() {
       const patient = await registerPatient(data);
       
       // Success
-      toast.toast({
+      toast.add({
         title: 'Registration Complete',
         description: `Patient registered with CPT: ${patient.cpt}`,
         color: 'success'
@@ -436,7 +436,7 @@ export function usePatientRegistration() {
       
       errors.general = message;
       
-      toast.toast({
+      toast.add({
         title: 'Registration Failed',
         description: message,
         color: 'error'

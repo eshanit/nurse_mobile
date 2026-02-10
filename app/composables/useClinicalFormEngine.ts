@@ -298,6 +298,18 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
   
   // Get field value from form state
   function getFieldValue(fieldId: string): unknown {
+    // First check if it's a calculated field
+    if (schema.value?.fields) {
+      const fieldDef = schema.value.fields.find((f: any) => f.id === fieldId);
+      if (fieldDef?.type === 'calculated') {
+        // Return value from calculated object (try both snake_case and camelCase)
+        return (
+          instance.value?.calculated?.[fieldId] ||
+          instance.value?.calculated?.[fieldId.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())]
+        );
+      }
+    }
+    // Otherwise return from form state (user answers)
     return formState.value[fieldId];
   }
   

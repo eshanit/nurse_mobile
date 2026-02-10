@@ -5,8 +5,10 @@ import { useAuth } from '@/composables/useAuth';
 import { useSecurityStore } from '@/stores/security';
 import { useDashboardStore, type DashboardState } from '@/stores/dashboard';
 import { getPatientByCPT } from '~/services/patientEngine';
-import { sanitizeCPTInput, validateCPTFormat } from '~/services/patientId';
+import { sanitizeCPTInput, validateCPTFormat, validateShortCPTFormat } from '~/services/patientId';
+import { isValidCpt } from '~/services/cptService';
 import type { ClinicalPatient } from '~/types/patient';
+import PatientSummaryCard from '~/components/patient/PatientSummaryCard.vue';
 
 const auth = useAuth();
 const securityStore = useSecurityStore();
@@ -225,14 +227,35 @@ function navigateToNewPatient() {
 }
 
 /**
- * Navigate to patient lookup
+ * Navigate to patient lookup via new session
+ * Patient lookup is session-bound, so we create a session first
  */
-function navigateToPatientLookup() {
-  navigateTo('/patient/lookup');
+async function navigateToPatientLookup() {
+  try {
+    // Create a new session first
+    const { createSession } = await import('~/services/sessionEngine');
+    const session = await createSession();
+    
+    // Navigate to patient lookup within the new session
+    navigateTo(`/sessions/${session.id}/patient-lookup`);
+  } catch (error) {
+    console.error('Failed to create session for patient lookup:', error);
+    // Fallback to sessions list
+    navigateTo('/sessions');
+  }
 }
 
 /**
- * Handle patient lookup by CPT
+ * Navigate to patient record
+ */
+function navigateToPatientRecord() {
+  if (foundPatient.value) {
+    navigateTo(`/patient/${foundPatient.value.cpt}`);
+  }
+}
+
+/**
+ * Handle patient lookup by CPT (supports 4-character format)
  */
 async function handleCPTLookup() {
   if (!cptInput.value.trim()) {
@@ -241,12 +264,11 @@ async function handleCPTLookup() {
   }
   
   // Sanitize CPT input
-  const sanitized = sanitizeCPTInput(cptInput.value);
+  const sanitized = cptInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
   
-  // Validate format
-  const validation = validateCPTFormat(sanitized);
-  if (!validation.isValid) {
-    lookupError.value = validation.error || 'Invalid CPT format';
+  // Validate 4-character format
+  if (!isValidCpt(sanitized) || sanitized.length !== 4) {
+    lookupError.value = 'Invalid CPT format. Use 4 characters (A-Z, 2-9)';
     return;
   }
   
@@ -258,13 +280,10 @@ async function handleCPTLookup() {
     const result = await getPatientByCPT(sanitized);
     
     if (result.found && result.patient) {
-      // Patient found - navigate to patient profile
+      // Patient found - store and show summary
       foundPatient.value = result.patient;
-      
-      // Navigate to session creation with patient
-      navigateTo(`/sessions/new?patientCpt=${result.patient.cpt}`);
     } else {
-      lookupError.value = 'Patient not found. Would you like to register this CPT?';
+      lookupError.value = 'Patient not found. Would you like to register this patient?';
     }
   } catch (error) {
     console.error('[Dashboard] Patient lookup failed:', error);
@@ -275,11 +294,32 @@ async function handleCPTLookup() {
 }
 
 /**
- * Handle CPT input change - clear errors
+ * Start a new visit for found patient
+ */
+function startNewVisit() {
+  if (foundPatient.value) {
+    navigateTo(`/sessions/new?patientCpt=${foundPatient.value.cpt}`);
+  }
+}
+
+/**
+ * Clear found patient
+ */
+function clearFoundPatient() {
+  foundPatient.value = null;
+  cptInput.value = '';
+  lookupError.value = null;
+}
+
+/**
+ * Handle CPT input change - auto-uppercase and validate
  */
 function handleCPTInputChange() {
   lookupError.value = null;
   foundPatient.value = null;
+  
+  // Auto-uppercase and filter invalid characters
+  cptInput.value = cptInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
 }
 
 /**
@@ -290,10 +330,14 @@ function handleOpenSessions() {
 }
 
 /**
- * Navigate to patient records
+ * Navigate to patient records with optional triage filter
  */
-function handleViewRecords() {
-  navigateTo('/records');
+function handleViewRecords(triage?: 'urgent' | 'attention' | 'stable') {
+  if (triage) {
+    navigateTo(`/records?filter=${triage}`);
+  } else {
+    navigateTo('/records');
+  }
 }
 
 /**
@@ -474,7 +518,7 @@ function getStateColor(state: DashboardState): string {
         <div 
           class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
           :class="{ 'ring-2 ring-red-500': stats.red > 0 }"
-          @click="handleViewRecords"
+          @click="handleViewRecords('urgent')"
         >
           <div class="flex items-center justify-between mb-2">
             <span class="text-red-400 text-xs font-medium uppercase tracking-wide">Urgent</span>
@@ -487,7 +531,7 @@ function getStateColor(state: DashboardState): string {
         <div 
           class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
           :class="{ 'ring-2 ring-yellow-500': stats.yellow > 0 }"
-          @click="handleViewRecords"
+          @click="handleViewRecords('attention')"
         >
           <div class="flex items-center justify-between mb-2">
             <span class="text-yellow-400 text-xs font-medium uppercase tracking-wide">Attention</span>
@@ -500,7 +544,7 @@ function getStateColor(state: DashboardState): string {
         <div 
           class="bg-gray-800 rounded-xl p-4 cursor-pointer hover:bg-gray-750 transition-colors"
           :class="{ 'ring-2 ring-green-500': stats.green > 0 }"
-          @click="handleViewRecords"
+          @click="handleViewRecords('stable')"
         >
           <div class="flex items-center justify-between mb-2">
             <span class="text-green-400 text-xs font-medium uppercase tracking-wide">Stable</span>
@@ -556,26 +600,33 @@ function getStateColor(state: DashboardState): string {
 
       <!-- Quick CPT Lookup (Inline) -->
       <div class="bg-gray-800 rounded-xl p-4 mb-6">
-        <h3 class="text-white font-medium mb-3">Quick CPT Lookup</h3>
+        <h3 class="text-white font-medium mb-3">Find Patient</h3>
         
         <div class="flex gap-2">
           <input
             type="text"
             v-model="cptInput"
             @input="handleCPTInputChange"
-            placeholder="Enter CPT (e.g., CP-7F3A-K92Q)"
-            class="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            @keyup.enter="handleCPTLookup"
+            placeholder="Enter CPT (4 characters)"
+            maxlength="4"
+            class="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono text-center tracking-widest"
           />
           <button 
             @click="handleCPTLookup"
-            :disabled="isLookingUpPatient"
+            :disabled="isLookingUpPatient || cptInput.length !== 4"
             class="px-6 py-3 bg-blue-700 hover:bg-blue-600 disabled:bg-blue-800 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
           >
             <svg v-if="isLookingUpPatient" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            <span>{{ isLookingUpPatient ? 'Looking up...' : 'Find' }}</span>
+            <span>{{ isLookingUpPatient ? 'Finding...' : 'Find' }}</span>
           </button>
+        </div>
+        
+        <!-- Character counter -->
+        <div class="mt-2 text-xs text-gray-500 text-right">
+          {{ cptInput.length }}/4 characters
         </div>
         
         <!-- Lookup Error -->
@@ -583,20 +634,14 @@ function getStateColor(state: DashboardState): string {
           <p class="text-red-400 text-sm">{{ lookupError }}</p>
         </div>
         
-        <!-- Found Patient -->
-        <div v-if="foundPatient" class="mt-3 p-3 bg-green-900/30 border border-green-700/50 rounded-lg">
-          <div class="flex items-center gap-3">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div>
-              <p class="text-green-400 font-medium">Patient Found: {{ foundPatient.cpt }}</p>
-              <p class="text-gray-400 text-sm">
-                {{ foundPatient.firstName }} {{ foundPatient.lastName }}
-                <span v-if="foundPatient.dateOfBirth"> • DOB: {{ foundPatient.dateOfBirth }}</span>
-              </p>
-            </div>
-          </div>
+        <!-- Found Patient Summary -->
+        <div v-if="foundPatient" class="mt-4">
+          <PatientSummaryCard
+            :patient="foundPatient"
+            @startVisit="startNewVisit"
+            @viewRecord="navigateToPatientRecord"
+            @clear="clearFoundPatient"
+          />
         </div>
       </div>
 

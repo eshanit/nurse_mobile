@@ -12,10 +12,14 @@ import { useRoute, navigateTo } from '#app';
 import { loadSession, completeSession, updateSession, type ClinicalSession } from '~/services/sessionEngine';
 import { formEngine } from '~/services/formEngine';
 import type { ClinicalFormInstance } from '~/types/clinical-form';
-import { useToast } from '~/composables/useToast';
 import { usePatientLookup } from '~/composables/usePatientLookup';
 import { getPatientFullName } from '~/types/patient';
 import { TWButton, TWCard, TWBadge, TWIcon, TWAlert } from '~/components/ui';
+import { useAIStore } from '~/stores/aiStore';
+import { isAIEnabled, getAIConfig } from '~/services/aiConfig';
+import { buildExplainabilityModel } from '~/services/explainabilityEngine';
+import { askClinicalAI } from '~/services/clinicalAI';
+import type { ExplainabilityRecord } from '~/types/explainability';
 
 // ============================================
 // Route & Params
@@ -53,6 +57,17 @@ const linkedPatient = ref<{ cpt: string; firstName: string; lastName: string } |
 const showPatientLookup = ref(false);
 
 // ============================================
+// AI State
+// ============================================
+
+const aiStore = useAIStore();
+const dischargeSummary = ref('');
+const handoffReport = ref('');
+const isGeneratingSummary = ref(false);
+const isGeneratingHandoff = ref(false);
+const explainabilityRecord = ref<ExplainabilityRecord | null>(null);
+
+// ============================================
 // Patient Lookup
 // ============================================
 
@@ -85,7 +100,7 @@ const {
       } as any);
     }
     
-    toastComposable.toast({
+    toastComposable.add({
       title: 'Patient Linked',
       description: `${patient.firstName} ${patient.lastName} has been linked to this session`,
       color: 'success'
@@ -293,6 +308,69 @@ async function loadSessionData() {
 }
 
 // ============================================
+// AI Methods
+// ============================================
+
+async function buildExplainabilityFromAssessment() {
+  if (!isAIEnabled('NOTE_SUMMARY') || !assessmentInstance.value) {
+    explainabilityRecord.value = null;
+    return;
+  }
+
+  try {
+    const config = getAIConfig();
+    const record = await buildExplainabilityModel(assessmentInstance.value, {
+      sessionId: sessionId.value,
+      useAI: config.enabled
+    });
+    explainabilityRecord.value = record;
+  } catch (err) {
+    console.warn('[Summary] Could not build explainability:', err);
+    explainabilityRecord.value = null;
+  }
+}
+
+async function generateDischargeSummary() {
+  if (!explainabilityRecord.value) return;
+
+  isGeneratingSummary.value = true;
+  dischargeSummary.value = '';
+
+  try {
+    dischargeSummary.value = await askClinicalAI('NOTE_SUMMARY', explainabilityRecord.value);
+  } catch (err) {
+    console.error('[Summary] Failed to generate discharge summary:', err);
+    toastComposable.add({
+      title: 'AI Error',
+      description: 'Failed to generate discharge summary. Please try again.',
+      color: 'error'
+    });
+  } finally {
+    isGeneratingSummary.value = false;
+  }
+}
+
+async function generateHandoffReport() {
+  if (!explainabilityRecord.value) return;
+
+  isGeneratingHandoff.value = true;
+  handoffReport.value = '';
+
+  try {
+    handoffReport.value = await askClinicalAI('CLINICAL_HANDOVER', explainabilityRecord.value);
+  } catch (err) {
+    console.error('[Summary] Failed to generate handoff report:', err);
+    toastComposable.add({
+      title: 'AI Error',
+      description: 'Failed to generate handoff report. Please try again.',
+      color: 'error'
+    });
+  } finally {
+    isGeneratingHandoff.value = false;
+  }
+}
+
+// ============================================
 // Actions
 // ============================================
 
@@ -320,7 +398,7 @@ async function confirmDischarge() {
     // Complete the session
     await completeSession(sessionId.value, 'completed');
     
-    toastComposable.toast({ 
+    toastComposable.add({ 
       title: 'Discharge Confirmed', 
       description: 'Patient has been successfully discharged',
       color: 'success' 
@@ -330,7 +408,7 @@ async function confirmDischarge() {
     navigateTo('/dashboard');
   } catch (err) {
     console.error('[Summary] Failed to complete discharge:', err);
-    toastComposable.toast({ 
+    toastComposable.add({ 
       title: 'Error', 
       description: 'Failed to complete discharge. Please try again.',
       color: 'error' 
@@ -360,8 +438,9 @@ function goBack() {
 // Lifecycle
 // ============================================
 
-onMounted(() => {
-  loadSessionData();
+onMounted(async () => {
+  await loadSessionData();
+  await buildExplainabilityFromAssessment();
 });
 </script>
 
@@ -748,6 +827,79 @@ onMounted(() => {
             <p class="text-xs text-gray-500 mt-1">
               Optional: Add any additional notes about the discharge process.
             </p>
+          </div>
+
+          <!-- AI Discharge Summary -->
+          <div v-if="explainabilityRecord" class="mt-6 pt-6 border-t border-gray-700">
+            <div class="flex items-center justify-between mb-4">
+              <h4 class="text-md font-semibold text-white flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                AI Clinical Summary
+              </h4>
+              <div class="flex gap-2">
+                <button
+                  v-if="!dischargeSummary && !isGeneratingSummary"
+                  @click="generateDischargeSummary"
+                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Generate Summary
+                </button>
+                <button
+                  v-if="!handoffReport && !isGeneratingHandoff"
+                  @click="generateHandoffReport"
+                  class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                  </svg>
+                  Generate Handoff
+                </button>
+              </div>
+            </div>
+
+            <!-- Loading States -->
+            <div v-if="isGeneratingSummary || isGeneratingHandoff" class="flex items-center gap-3 text-gray-400 py-4">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>{{ isGeneratingSummary ? 'Generating discharge summary...' : 'Generating handoff report...' }}</span>
+            </div>
+
+            <!-- Discharge Summary -->
+            <div v-else-if="dischargeSummary" class="space-y-3">
+              <div class="bg-gray-700/30 rounded-lg p-4 text-gray-300 text-sm leading-relaxed">
+                {{ dischargeSummary }}
+              </div>
+              <p class="text-xs text-gray-500 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                AI-generated summary. Review for accuracy before use.
+              </p>
+            </div>
+
+            <!-- Handoff Report -->
+            <div v-else-if="handoffReport" class="space-y-3">
+              <div class="bg-purple-900/20 border border-purple-700/50 rounded-lg p-4 text-gray-300 text-sm leading-relaxed">
+                {{ handoffReport }}
+              </div>
+              <p class="text-xs text-gray-500 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                AI-generated handoff. Review for accuracy before use.
+              </p>
+            </div>
+
+            <!-- Placeholder -->
+            <div v-else class="text-gray-500 text-sm py-4">
+              <p>Generate a clinical summary or handoff report using AI assistance.</p>
+            </div>
           </div>
         </div>
       </TWCard>
