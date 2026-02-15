@@ -3,6 +3,13 @@
     <div class="dashboard-header">
       <h1>🔐 Admin Dashboard</h1>
       <p>Security management and monitoring</p>
+      
+      <!-- Phase 3: Analytics Navigation -->
+      <div class="header-actions">
+        <NuxtLink to="/admin/analytics" class="btn-analytics">
+          📊 View Analytics
+        </NuxtLink>
+      </div>
     </div>
 
     <div class="dashboard-content">
@@ -176,6 +183,152 @@
           </button>
         </div>
       </div>
+
+      <!-- Phase 4: AI Safety Controls Section -->
+      <div class="section ai-safety-section">
+        <h2>🤖 AI Safety Controls</h2>
+        <p class="section-description">
+          Emergency controls for MedGemma AI system. Use these to disable or restrict AI functionality 
+          across all sessions when safety concerns arise.
+        </p>
+
+        <div class="ai-controls-grid">
+          <!-- Master Kill Switch -->
+          <div class="control-card" :class="{ disabled: aiControls.aiDisabled }">
+            <div class="control-header">
+              <span class="control-icon">🛑</span>
+              <div class="control-title">
+                <h3>Master Kill Switch</h3>
+                <span class="control-status" :class="aiControls.aiDisabled ? 'danger' : 'success'">
+                  {{ aiControls.aiDisabled ? 'DISABLED' : 'ACTIVE' }}
+                </span>
+              </div>
+            </div>
+            <p class="control-description">
+              Completely disable all AI suggestions. Use in emergency situations.
+            </p>
+            <button 
+              class="btn-control"
+              :class="aiControls.aiDisabled ? 'btn-enable' : 'btn-danger'"
+              @click="toggleAIKillSwitch"
+            >
+              {{ aiControls.aiDisabled ? '✅ Re-enable AI' : '🛑 Disable AI' }}
+            </button>
+          </div>
+
+          <!-- Explanations Only Mode -->
+          <div class="control-card" :class="{ active: aiControls.explanationsOnly }">
+            <div class="control-header">
+              <span class="control-icon">📖</span>
+              <div class="control-title">
+                <h3>Explanations Only</h3>
+                <span class="control-status" :class="aiControls.explanationsOnly ? 'warning' : 'neutral'">
+                  {{ aiControls.explanationsOnly ? 'RESTRICTED' : 'NORMAL' }}
+                </span>
+              </div>
+            </div>
+            <p class="control-description">
+              Restrict AI to only provide explanations, no treatment suggestions.
+            </p>
+            <button 
+              class="btn-control"
+              :class="aiControls.explanationsOnly ? 'btn-primary' : 'btn-secondary'"
+              @click="toggleExplanationsOnly"
+            >
+              {{ aiControls.explanationsOnly ? '✓ Active' : 'Enable' }}
+            </button>
+          </div>
+
+          <!-- Force Referral Mode -->
+          <div class="control-card" :class="{ active: aiControls.forceReferral }">
+            <div class="control-header">
+              <span class="control-icon">🏥</span>
+              <div class="control-title">
+                <h3>Force Referral Mode</h3>
+                <span class="control-status" :class="aiControls.forceReferral ? 'warning' : 'neutral'">
+                  {{ aiControls.forceReferral ? 'ENFORCED' : 'NORMAL' }}
+                </span>
+              </div>
+            </div>
+            <p class="control-description">
+              AI will always recommend facility referral regardless of assessment.
+            </p>
+            <button 
+              class="btn-control"
+              :class="aiControls.forceReferral ? 'btn-primary' : 'btn-secondary'"
+              @click="toggleForceReferral"
+            >
+              {{ aiControls.forceReferral ? '✓ Active' : 'Enable' }}
+            </button>
+          </div>
+
+          <!-- Risk Threshold -->
+          <div class="control-card">
+            <div class="control-header">
+              <span class="control-icon">⚠️</span>
+              <div class="control-title">
+                <h3>Risk Threshold</h3>
+                <span class="control-status neutral">
+                  Level: {{ aiControls.riskThreshold }}
+                </span>
+              </div>
+            </div>
+            <p class="control-description">
+              Block AI responses when risk score exceeds threshold (0-10).
+            </p>
+            <div class="threshold-control">
+              <input 
+                type="range" 
+                min="0" 
+                max="10" 
+                v-model.number="aiControls.riskThreshold"
+                @change="updateRiskThreshold"
+                class="threshold-slider"
+              />
+              <div class="threshold-labels">
+                <span>Permissive (0)</span>
+                <span>Strict (10)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Session Escalation Stats -->
+        <div class="escalation-stats">
+          <h3>Session Escalation Status</h3>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-value">{{ escalationStats.activeSessions }}</span>
+              <span class="stat-label">Active Sessions</span>
+            </div>
+            <div class="stat-item warning">
+              <span class="stat-value">{{ escalationStats.warningSessions }}</span>
+              <span class="stat-label">Warning (1-2)</span>
+            </div>
+            <div class="stat-item danger">
+              <span class="stat-value">{{ escalationStats.escalatedSessions }}</span>
+              <span class="stat-label">Escalated (3+)</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">{{ escalationStats.totalWarnings }}</span>
+              <span class="stat-label">Total Warnings</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Emergency Actions -->
+        <div class="emergency-actions">
+          <h3>⚠️ Emergency Actions</h3>
+          <div class="actions-row">
+            <button class="btn-danger" @click="resetAllSessions">
+              🔄 Reset All Session Warnings
+            </button>
+            <button class="btn-danger" @click="lockdownAI">
+              🔒 Emergency Lockdown (Disable + Referral)
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Pair Device Modal -->
@@ -320,8 +473,24 @@ const newDevice = ref({
   publicKey: ''
 });
 
+// Phase 4: AI Safety Controls State
+const aiControls = ref({
+  aiDisabled: false,
+  explanationsOnly: false,
+  forceReferral: false,
+  riskThreshold: 7
+});
+
+const escalationStats = ref({
+  activeSessions: 0,
+  warningSessions: 0,
+  escalatedSessions: 0,
+  totalWarnings: 0
+});
+
 onMounted(() => {
   refreshAllData();
+  loadAIControls();
 });
 
 function refreshAllData() {
@@ -481,6 +650,74 @@ function clearAuditLog() {
   if (confirm('Clear all audit logs? This cannot be undone.')) {
     clearAudit();
     refreshAllData();
+  }
+}
+
+// Phase 4: AI Safety Control Functions
+function toggleAIKillSwitch() {
+  aiControls.value.aiDisabled = !aiControls.value.aiDisabled;
+  saveAIControls();
+  console.log('[AdminDashboard] AI Kill Switch:', aiControls.value.aiDisabled ? 'DISABLED' : 'ENABLED');
+}
+
+function toggleExplanationsOnly() {
+  aiControls.value.explanationsOnly = !aiControls.value.explanationsOnly;
+  saveAIControls();
+  console.log('[AdminDashboard] Explanations Only Mode:', aiControls.value.explanationsOnly ? 'ENABLED' : 'DISABLED');
+}
+
+function toggleForceReferral() {
+  aiControls.value.forceReferral = !aiControls.value.forceReferral;
+  saveAIControls();
+  console.log('[AdminDashboard] Force Referral Mode:', aiControls.value.forceReferral ? 'ENABLED' : 'DISABLED');
+}
+
+function updateRiskThreshold() {
+  saveAIControls();
+  console.log('[AdminDashboard] Risk Threshold updated to:', aiControls.value.riskThreshold);
+}
+
+function saveAIControls() {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('healthbridge_ai_controls', JSON.stringify(aiControls.value));
+  }
+}
+
+function loadAIControls() {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem('healthbridge_ai_controls');
+    if (saved) {
+      try {
+        aiControls.value = JSON.parse(saved);
+      } catch (e) {
+        console.error('[AdminDashboard] Failed to load AI controls:', e);
+      }
+    }
+  }
+}
+
+function resetAllSessions() {
+  if (confirm('Reset all session warning counts? This will re-enable AI for escalated sessions.')) {
+    // Clear session escalation data
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('healthbridge_session_warnings');
+    }
+    escalationStats.value = {
+      activeSessions: 0,
+      warningSessions: 0,
+      escalatedSessions: 0,
+      totalWarnings: 0
+    };
+    console.log('[AdminDashboard] All session warnings reset');
+  }
+}
+
+function lockdownAI() {
+  if (confirm('EMERGENCY LOCKDOWN: This will disable AI and force referral mode. Continue?')) {
+    aiControls.value.aiDisabled = true;
+    aiControls.value.forceReferral = true;
+    saveAIControls();
+    console.log('[AdminDashboard] EMERGENCY LOCKDOWN activated');
   }
 }
 </script>
@@ -904,5 +1141,241 @@ function clearAuditLog() {
   display: flex;
   gap: 12px;
   margin-top: 24px;
+}
+
+/* Phase 4: AI Safety Controls Styles */
+.ai-safety-section {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #fff;
+}
+
+.ai-safety-section h2 {
+  color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 12px;
+}
+
+.ai-safety-section h3 {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.section-description {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.ai-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.control-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 16px;
+  transition: all 0.3s ease;
+}
+
+.control-card.disabled {
+  border-color: #dc3545;
+  background: rgba(220, 53, 69, 0.1);
+}
+
+.control-card.active {
+  border-color: #ffc107;
+  background: rgba(255, 193, 7, 0.1);
+}
+
+.control-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.control-icon {
+  font-size: 24px;
+}
+
+.control-title h3 {
+  font-size: 14px;
+  margin: 0 0 4px;
+  color: #fff;
+}
+
+.control-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.control-status.success {
+  background: rgba(40, 167, 69, 0.2);
+  color: #28a745;
+}
+
+.control-status.danger {
+  background: rgba(220, 53, 69, 0.2);
+  color: #dc3545;
+}
+
+.control-status.warning {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+}
+
+.control-status.neutral {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.control-description {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.btn-control {
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.btn-enable {
+  background: #28a745;
+  color: white;
+}
+
+.btn-enable:hover {
+  background: #218838;
+}
+
+.threshold-control {
+  margin-top: 8px;
+}
+
+.threshold-slider {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.threshold-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #4dabf7;
+  cursor: pointer;
+}
+
+.threshold-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 4px;
+}
+
+.escalation-stats {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.escalation-stats h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+.stat-item .stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.stat-item .stat-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.stat-item.warning .stat-value {
+  color: #ffc107;
+}
+
+.stat-item.danger .stat-value {
+  color: #dc3545;
+}
+
+.emergency-actions {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 16px;
+}
+
+.emergency-actions h3 {
+  color: #dc3545;
+  margin-bottom: 12px;
+}
+
+.header-actions {
+  margin-top: 16px;
+}
+
+.btn-analytics {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: #4dabf7;
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: 500;
+  transition: background 0.2s ease;
+}
+
+.btn-analytics:hover {
+  background: #3d8bd4;
+}
+
+@media (max-width: 768px) {
+  .ai-controls-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>

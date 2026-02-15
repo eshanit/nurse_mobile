@@ -298,14 +298,14 @@ The AI **must never**:
 ```bash
 # Install Ollama (if not installed)
 # Download MedGemma model
-ollama pull medgemma:4b
+ollama pull gemma3:4b
 
 # Start server
 ollama serve
 
 # In .env file
 OLLAMA_ENDPOINT=http://localhost:11434/api/generate
-AI_MODEL=medgemma:4b
+AI_MODEL=gemma3:4b
 ```
 
 ---

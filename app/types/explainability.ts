@@ -1,6 +1,20 @@
 export type Priority = 'red' | 'yellow' | 'green';
 export type RuleSource = 'WHO_IMCI' | 'LocalProtocol' | 'Calculation';
-export type AIUseCase = 'EXPLAIN_TRIAGE' | 'CARE_EDUCATION' | 'CLINICAL_HANDOVER' | 'NOTE_SUMMARY';
+/**
+ * AI Use Cases / Task Types
+ * Extended per system-ai-json-draft.md specification
+ */
+export type AIUseCase =
+  | 'EXPLAIN_TRIAGE'
+  | 'INCONSISTENCY_CHECK'
+  | 'SUGGEST_ACTIONS'
+  | 'TREATMENT_ADVICE'
+  | 'CAREGIVER_INSTRUCTIONS'
+  | 'CLINICAL_NARRATIVE'
+  | 'CARE_EDUCATION'
+  | 'CLINICAL_HANDOVER'
+  | 'NOTE_SUMMARY'
+  | 'SECTION_GUIDANCE';  // Phase 3: Cumulative prompts for section-by-section guidance
 
 export interface ExplainabilityRecord {
   id: string;

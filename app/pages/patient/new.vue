@@ -143,12 +143,20 @@ async function handleSubmit() {
   registeredPatientCPT.value = null;
 
   try {
-    // Prepare registration data - only required fields
+    // Prepare registration data - include optional weight
+    // Handle both string and number types from form input
+    const weightValue = form.value.weightKg;
+    const parsedWeight = typeof weightValue === 'string' 
+      ? parseFloat(weightValue) 
+      : weightValue;
+    const weightKg = weightValue && !isNaN(parsedWeight) ? parsedWeight : undefined;
+    
     const data: PatientRegistrationData = {
       firstName: form.value.firstName?.trim() || '',
       lastName: form.value.lastName?.trim() || '',
       dateOfBirth: form.value.dateOfBirth || undefined,
-      gender: form.value.gender || undefined
+      gender: form.value.gender || undefined,
+      weightKg
     };
 
     // Register patient
@@ -386,8 +394,8 @@ async function generateNewCPT() {
             </div>
           </div>
 
-          <!-- DOB and Gender -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- DOB, Gender and Weight -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="form-group">
               <label for="dateOfBirth" class="block text-gray-300 text-sm font-medium mb-2">
                 Date of Birth
@@ -415,6 +423,26 @@ async function generateNewCPT() {
                 <option value="female">Female</option>
                 <option value="other">Other</option>
               </select>
+            </div>
+
+            <div class="form-group">
+              <label for="weightKg" class="block text-gray-300 text-sm font-medium mb-2">
+                Weight <span class="text-gray-500 text-xs">(Optional)</span>
+              </label>
+              <div class="relative">
+                <input
+                  id="weightKg"
+                  v-model="form.weightKg"
+                  type="number"
+                  step="0.1"
+                  min="0.5"
+                  max="500"
+                  class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors pr-12"
+                  placeholder="e.g., 12.5"
+                />
+                <span class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm">kg</span>
+              </div>
+              <p class="text-gray-500 text-xs mt-1">Enter weight in kilograms (0.5 - 500 kg)</p>
             </div>
           </div>
         </div>

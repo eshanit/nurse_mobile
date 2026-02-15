@@ -231,14 +231,14 @@ AI-generated. Please review for accuracy before sharing with caregivers.
 
 1. Ollama server running with MedGemma model:
 ```bash
-ollama pull medgemma:4b
+ollama pull gemma3:4b
 ollama serve
 ```
 
 2. Environment variables set in `.env`:
 ```env
 OLLAMA_ENDPOINT=http://localhost:11434/api/generate
-AI_MODEL=medgemma:4b
+AI_MODEL=gemma3:4b
 AI_ENABLED=true
 ```
 

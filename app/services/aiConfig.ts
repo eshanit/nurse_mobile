@@ -7,7 +7,7 @@ const aiConfig = useStorage<AIConfig>('healthbridge_ai_config', {
   allowEducation: true,
   allowHandover: true,
   allowSummary: true,
-  model: process.env.AI_MODEL || 'medgemma:4b',
+  model: process.env.AI_MODEL || 'gemma3:4b',
   endpoint: process.env.OLLAMA_ENDPOINT || 'http://localhost:11434/api/generate'
 });
 
@@ -28,6 +28,8 @@ export function isAIEnabled(useCase?: AIUseCase): boolean {
       case 'CARE_EDUCATION': return aiConfig.value.allowEducation;
       case 'CLINICAL_HANDOVER': return aiConfig.value.allowHandover;
       case 'NOTE_SUMMARY': return aiConfig.value.allowSummary;
+      // Phase 3: Cumulative prompts - always enabled when AI is enabled
+      case 'SECTION_GUIDANCE': return true;
     }
   }
   

@@ -4,8 +4,6 @@
  * Handles communication with local Ollama server for clinical AI features
  */
 
-import { useRuntimeConfig } from '#app';
-
 export interface OllamaRequest {
   model: string;
   prompt: string;

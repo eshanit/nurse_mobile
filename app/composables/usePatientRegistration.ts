@@ -54,6 +54,7 @@ interface RegistrationFormState {
   gender: PatientGender | '';
   phone: string;
   email: string;
+  weightKg: string;  // Store as string for input, convert to number on submit
   address: {
     street: string;
     city: string;
@@ -104,6 +105,7 @@ export function usePatientRegistration() {
     gender: '',
     phone: '',
     email: '',
+    weightKg: '',
     address: {
       street: '',
       city: '',
@@ -391,6 +393,13 @@ export function usePatientRegistration() {
       }
       
       // Prepare data
+      // Parse weight - handle both string and number types from form input
+      const weightValue = form.weightKg;
+      const parsedWeight = typeof weightValue === 'string' 
+        ? parseFloat(weightValue) 
+        : weightValue;
+      const weightKg = weightValue && !isNaN(parsedWeight) ? parsedWeight : undefined;
+      
       const data: PatientRegistrationData = {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
@@ -398,6 +407,7 @@ export function usePatientRegistration() {
         gender: form.gender || undefined,
         phone: form.phone.trim() || undefined,
         email: form.email.trim() || undefined,
+        weightKg,
         address: form.address.street ? form.address : undefined,
         emergencyContact: form.emergencyContact.name ? form.emergencyContact : undefined,
         insuranceInfo: form.insuranceInfo.provider ? form.insuranceInfo : undefined
@@ -463,6 +473,7 @@ export function usePatientRegistration() {
     form.gender = '';
     form.phone = '';
     form.email = '';
+    form.weightKg = '';
     form.address = {
       street: '',
       city: '',

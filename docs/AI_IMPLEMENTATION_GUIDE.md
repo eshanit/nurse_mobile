@@ -62,7 +62,7 @@ This document provides a complete, step-by-step guide to implementing the clinic
 # AI Configuration
 AI_ENABLED=true
 OLLAMA_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=medgemma:4b
+OLLAMA_MODEL=gemma3:4b
 AI_RATE_LIMIT=30
 AI_TIMEOUT=60000
 AI_AUTH_TOKEN=local-dev-token
@@ -83,7 +83,7 @@ AI_ENABLED=true
 OLLAMA_URL=http://127.0.0.1:11434
 
 # Model to use (medgemma:4b recommended for clinical use)
-OLLAMA_MODEL=medgemma:4b
+OLLAMA_MODEL=gemma3:4b
 
 # Rate limit: max requests per minute per IP
 AI_RATE_LIMIT=30
@@ -112,7 +112,7 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     ollamaUrl: process.env.OLLAMA_URL || 'http://127.0.0.1:11434',
-    ollamaModel: process.env.OLLAMA_MODEL || 'medgemma:4b',
+    ollamaModel: process.env.OLLAMA_MODEL || 'gemma3:4b',
     aiRateLimit: Number(process.env.AI_RATE_LIMIT) || 30,
     aiTimeout: Number(process.env.AI_TIMEOUT) || 60000,
     aiAuthToken: process.env.AI_AUTH_TOKEN || 'local-dev-token',
@@ -506,7 +506,7 @@ export function getAIServiceStatus(): { configured: boolean; endpoint: string; m
   return {
     configured: true,
     endpoint: process.env.OLLAMA_ENDPOINT || 'http://localhost:11434/api/generate',
-    model: process.env.AI_MODEL || 'medgemma:4b'
+    model: process.env.AI_MODEL || 'gemma3:4b'
   };
 }
 ```
@@ -856,7 +856,7 @@ async function generateHandoffReport() {
 
 ```bash
 # Pull the MedGemma model
-ollama pull medgemma:4b
+ollama pull gemma3:4b
 
 # Start Ollama server
 ollama serve

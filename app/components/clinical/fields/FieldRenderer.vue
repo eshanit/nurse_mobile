@@ -6,22 +6,46 @@
  * 
  * All form fields MUST use this component for rendering.
  * Maps field types to NuxtUI components.
+ * 
+ * Phase 3 Integration: Voice Input support for text/textarea fields
  */
 
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { FieldDefinition } from '~/types/clinical-form';
+import VoiceInputButton from '~/components/clinical/VoiceInputButton.vue';
 
 const props = defineProps<{
   field: FieldDefinition;
   modelValue: any;
   error?: string;
   disabled?: boolean;
+  /** Enable voice input for this field */
+  enableVoice?: boolean;
+  /** Language for voice input (en, sn, nd) */
+  voiceLanguage?: 'en' | 'sn' | 'nd';
 }>();
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: any): void;
   (e: 'blur', event: FocusEvent): void;
 }>();
+
+// Voice input state
+const showVoiceButton = computed(() => {
+  return props.enableVoice && (fieldType.value === 'text' || fieldType.value === 'textarea' || fieldType.value === 'number');
+});
+
+function handleVoiceTranscript(transcript: string) {
+  // For number fields, try to extract a number
+  if (fieldType.value === 'number') {
+    const num = parseFloat(transcript.replace(/[^0-9.-]/g, ''));
+    if (!isNaN(num)) {
+      updateValue(num);
+    }
+  } else {
+    updateValue(transcript);
+  }
+}
 
 // Field properties
 const fieldId = computed(() => props.field.id);
@@ -119,45 +143,59 @@ function handleBlur(event: FocusEvent) {
       />
     </template>
 
-    <!-- Text Input -->
-    <UInput
-      v-if="fieldType === 'text'"
-      :id="fieldId"
-      :model-value="modelValue"
-      :placeholder="placeholder"
-      :disabled="disabled"
-      :color="uiColor"
-      class="w-full"
-      @update:model-value="updateValue"
-      @blur="handleBlur"
-      :ui="{ 
-        base: 'w-full bg-gray-700 text-white border-gray-600 focus:border-blue-500 focus:ring-blue-500'
-      }"
-    />
+    <!-- Text Input with Voice Support -->
+    <div v-if="fieldType === 'text'" class="flex items-center gap-2">
+      <UInput
+        :id="fieldId"
+        :model-value="modelValue"
+        :placeholder="placeholder"
+        :disabled="disabled"
+        :color="uiColor"
+        class="flex-1"
+        @update:model-value="updateValue"
+        @blur="handleBlur"
+        :ui="{ 
+          base: 'w-full bg-gray-700 text-white border-gray-600 focus:border-blue-500 focus:ring-blue-500'
+        }"
+      />
+      <VoiceInputButton
+        v-if="showVoiceButton"
+        @transcript="handleVoiceTranscript"
+        :language="voiceLanguage || 'en'"
+        :disabled="disabled"
+      />
+    </div>
 
-    <!-- Number Input -->
-    <UInput
-      v-else-if="fieldType === 'number'"
-      :id="fieldId"
-      type="number"
-      :model-value="modelValue"
-      :placeholder="placeholder"
-      :disabled="disabled"
-      :min="min"
-      :max="max"
-      :step="step"
-      :color="uiColor"
-      class="w-full"
-      @update:model-value="(val) => updateValue(val ? Number(val) : null)"
-      @blur="handleBlur"
-      :ui="{ 
-        base: 'w-full bg-gray-700 text-white border-gray-600 focus:border-blue-500 focus:ring-blue-500'
-      }"
-    >
-      <template v-if="suffix" #trailing>
-        <span class="text-gray-400 text-sm">{{ suffix }}</span>
-      </template>
-    </UInput>
+    <!-- Number Input with Voice Support -->
+    <div v-else-if="fieldType === 'number'" class="flex items-center gap-2">
+      <UInput
+        :id="fieldId"
+        type="number"
+        :model-value="modelValue"
+        :placeholder="placeholder"
+        :disabled="disabled"
+        :min="min"
+        :max="max"
+        :step="step"
+        :color="uiColor"
+        class="flex-1"
+        @update:model-value="(val) => updateValue(val ? Number(val) : null)"
+        @blur="handleBlur"
+        :ui="{ 
+          base: 'w-full bg-gray-700 text-white border-gray-600 focus:border-blue-500 focus:ring-blue-500'
+        }"
+      >
+        <template v-if="suffix" #trailing>
+          <span class="text-gray-400 text-sm">{{ suffix }}</span>
+        </template>
+      </UInput>
+      <VoiceInputButton
+        v-if="showVoiceButton"
+        @transcript="handleVoiceTranscript"
+        :language="voiceLanguage || 'en'"
+        :disabled="disabled"
+      />
+    </div>
 
     <!-- Select -->
     <USelect
@@ -258,21 +296,28 @@ function handleBlur(event: FocusEvent) {
       }"
     />
 
-    <!-- Textarea -->
-    <UTextarea
-      v-else-if="fieldType === 'textarea'"
-      :id="fieldId"
-      :model-value="modelValue"
-      :placeholder="placeholder"
-      :disabled="disabled"
-      :rows="3"
-      class="w-full"
-      @update:model-value="updateValue"
-      @blur="handleBlur"
-      :ui="{ 
-        base: 'w-full bg-gray-700 text-white border-gray-600 focus:border-blue-500 focus:ring-blue-500'
-      }"
-    />
+    <!-- Textarea with Voice Support -->
+    <div v-else-if="fieldType === 'textarea'" class="flex items-start gap-2">
+      <UTextarea
+        :id="fieldId"
+        :model-value="modelValue"
+        :placeholder="placeholder"
+        :disabled="disabled"
+        :rows="3"
+        class="flex-1"
+        @update:model-value="updateValue"
+        @blur="handleBlur"
+        :ui="{ 
+          base: 'w-full bg-gray-700 text-white border-gray-600 focus:border-blue-500 focus:ring-blue-500'
+        }"
+      />
+      <VoiceInputButton
+        v-if="showVoiceButton"
+        @transcript="handleVoiceTranscript"
+        :language="voiceLanguage || 'en'"
+        :disabled="disabled"
+      />
+    </div>
 
     <!-- Calculated Field (read-only) -->
     <div v-else-if="fieldType === 'calculated'" class="text-sm font-medium text-gray-300 p-3 bg-gray-800 rounded">

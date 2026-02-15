@@ -17,8 +17,12 @@ import type { ClinicalFormInstance } from '~/types/clinical-form';
 import { useAIStore } from '~/stores/aiStore';
 import { isAIEnabled, getAIConfig } from '~/services/aiConfig';
 import { buildExplainabilityModel } from '~/services/explainabilityEngine';
-import { askClinicalAI } from '~/services/clinicalAI';
+import { askClinicalAI, streamClinicalAI, type StructuredResponse } from '~/services/clinicalAI';
 import type { ExplainabilityRecord } from '~/types/explainability';
+import ExplainabilityCard from '~/components/clinical/ExplainabilityCard.vue';
+import AIStreamingPanel from '~/components/clinical/AIStreamingPanel.vue';
+import AdherenceRiskIndicator from '~/components/clinical/AdherenceRiskIndicator.vue';
+import { useAdherenceRisk, extractAdherenceFactors } from '~/composables/useAdherenceRisk';
 
 // ============================================
 // Types & Interfaces
@@ -117,6 +121,40 @@ const aiStore = useAIStore();
 const caregiverEducation = ref('');
 const isGeneratingEducation = ref(false);
 const explainabilityRecord = ref<ExplainabilityRecord | null>(null);
+
+// Streaming AI State (Phase 2)
+const isStreamingEducation = ref(false);
+const streamingEducationText = ref('');
+const streamingEducationProgress = ref(0);
+const structuredTreatmentResponse = ref<StructuredResponse | null>(null);
+let streamingCancel: (() => void) | null = null;
+
+// Section-based Streaming AI State (MedGemma Treatment Integration)
+const isStreamingSection = ref(false);
+const streamingSectionResponse = ref('');
+const streamingSectionProgress = ref(0);
+const cumulativeSummary = ref(''); // Cumulative summary from assessment
+const sectionSummaries = ref<Map<string, string>>(new Map()); // Track summaries per section
+
+// Adherence Risk State (Phase 2.1 Task 2.1.3)
+const adherenceFactors = computed(() => {
+  // Get patient age from session or assessment
+  let patientAgeMonths = 36; // Default to 3 years
+  if (session.value?.dateOfBirth) {
+    const dob = new Date(session.value.dateOfBirth);
+    const today = new Date();
+    patientAgeMonths = (today.getFullYear() - dob.getFullYear()) * 12 + 
+                       (today.getMonth() - dob.getMonth());
+  }
+  
+  return extractAdherenceFactors(
+    formValues.value,
+    patientAgeMonths,
+    0 // previousMissedVisits - would need to be fetched from patient history
+  );
+});
+
+const { riskResult } = useAdherenceRisk(adherenceFactors);
 
 // ============================================
 // Services
@@ -515,15 +553,65 @@ async function buildExplainabilityFromAssessment() {
 async function generateCaregiverEducation() {
   if (!explainabilityRecord.value) return;
 
-  isGeneratingEducation.value = true;
+  // Use streaming for better UX (Phase 2 enhancement)
+  isStreamingEducation.value = true;
+  streamingEducationText.value = '';
+  streamingEducationProgress.value = 0;
   caregiverEducation.value = '';
 
   try {
-    const response = await askClinicalAI('CARE_EDUCATION', explainabilityRecord.value);
-
-    caregiverEducation.value = response;
+    const result = await streamClinicalAI(
+      'CAREGIVER_INSTRUCTIONS',
+      explainabilityRecord.value,
+      {
+        onChunk: (chunk) => {
+          streamingEducationText.value += chunk;
+        },
+        onProgress: (tokens, total) => {
+          streamingEducationProgress.value = total > 0 ? (tokens / total) * 100 : 50;
+        },
+        onComplete: (fullResponse, duration) => {
+          caregiverEducation.value = fullResponse;
+          isStreamingEducation.value = false;
+          console.log(`[Treatment] Caregiver education generated in ${duration}ms`);
+        },
+        onError: (err, recoverable) => {
+          console.error('[Treatment] Streaming error:', err);
+          isStreamingEducation.value = false;
+          
+          // Fallback to non-streaming on error
+          fallbackGenerateEducation();
+        },
+        onCancel: () => {
+          isStreamingEducation.value = false;
+          console.log('[Treatment] Caregiver education generation cancelled');
+        }
+      }
+    );
+    
+    streamingCancel = result.cancel;
   } catch (err) {
     console.error('[Treatment] Failed to generate caregiver education:', err);
+    isStreamingEducation.value = false;
+    
+    // Fallback to non-streaming
+    await fallbackGenerateEducation();
+  }
+}
+
+/**
+ * Fallback to non-streaming AI if streaming fails
+ */
+async function fallbackGenerateEducation() {
+  if (!explainabilityRecord.value) return;
+  
+  isGeneratingEducation.value = true;
+  
+  try {
+    const response = await askClinicalAI('CARE_EDUCATION', explainabilityRecord.value);
+    caregiverEducation.value = response;
+  } catch (err) {
+    console.error('[Treatment] Fallback generation failed:', err);
     toastComposable.add({
       title: 'AI Error',
       description: 'Failed to generate caregiver education. Please try again.',
@@ -531,6 +619,160 @@ async function generateCaregiverEducation() {
     });
   } finally {
     isGeneratingEducation.value = false;
+  }
+}
+
+/**
+ * Cancel ongoing streaming education generation
+ */
+function cancelEducationGeneration() {
+  if (streamingCancel) {
+    streamingCancel();
+    streamingCancel = null;
+  }
+}
+
+// ============================================
+// Section-based Streaming AI (MedGemma Treatment Integration)
+// ============================================
+
+/**
+ * Request MedGemma guidance for the current treatment section
+ */
+async function askMedGemmaForSection() {
+  if (!isAIEnabled('SECTION_GUIDANCE')) {
+    console.warn('[Treatment] AI is disabled for section guidance');
+    return;
+  }
+  
+  if (isStreamingSection.value) {
+    console.log('[Treatment] Already streaming, skipping');
+    return;
+  }
+  
+  const sectionId = currentSection.value?.id;
+  if (!sectionId) {
+    console.warn('[Treatment] No current section to get guidance for');
+    return;
+  }
+  
+  console.log('[Treatment] Requesting MedGemma guidance for section:', sectionId);
+  
+  // Initialize streaming state
+  isStreamingSection.value = true;
+  streamingSectionResponse.value = '';
+  streamingSectionProgress.value = 0;
+  
+  try {
+    // Build patient context from session with safe defaults
+    const patientContext = {
+      ageMonths: session.value?.dateOfBirth 
+        ? Math.floor((Date.now() - new Date(session.value.dateOfBirth).getTime()) / (30 * 24 * 60 * 60 * 1000))
+        : 36, // Default to 36 months (3 years) if no date of birth
+      weightKg: formValues.value.patient_weight_kg ?? 10, // Default to 10kg if not provided
+      gender: session.value?.gender ?? 'unknown', // Default to 'unknown' if not provided
+      triagePriority: session.value?.triage || formValues.value.triage_priority
+    };
+    
+    // Get cumulative summary from previous sections
+    const previousSummaries = Array.from(sectionSummaries.value.entries())
+      .filter(([id]) => id !== sectionId)
+      .map(([, summary]) => summary)
+      .join('\n');
+    
+    const result = await streamClinicalAI(
+      'SECTION_GUIDANCE',
+      {
+        sessionId: sessionId.value,
+        schemaId: 'peds_respiratory_treatment',
+        formId: 'treatment',
+        sectionId: sectionId,
+        cumulativeSummary: cumulativeSummary.value + '\n' + previousSummaries,
+        patient: patientContext,
+        assessment: {
+          answers: formValues.value
+        }
+      },
+      {
+        onChunk: (chunk) => {
+          streamingSectionResponse.value += chunk;
+        },
+        onProgress: (tokens, total) => {
+          streamingSectionProgress.value = total > 0 ? (tokens / total) * 100 : 50;
+        },
+        onComplete: (fullResponse, duration, summary) => {
+          isStreamingSection.value = false;
+          
+          // Store the summary for this section if provided
+          if (summary) {
+            sectionSummaries.value.set(sectionId, summary);
+          }
+          
+          console.log(`[Treatment] Section guidance generated in ${duration}ms`);
+        },
+        onError: (err, recoverable) => {
+          console.error('[Treatment] Section streaming error:', err);
+          isStreamingSection.value = false;
+          streamingSectionResponse.value = `Error: ${err}`;
+        },
+        onCancel: () => {
+          isStreamingSection.value = false;
+          console.log('[Treatment] Section guidance cancelled');
+        }
+      }
+    );
+    
+    streamingCancel = result.cancel;
+  } catch (err) {
+    console.error('[Treatment] Failed to get section guidance:', err);
+    isStreamingSection.value = false;
+    streamingSectionResponse.value = `Failed to get guidance: ${err instanceof Error ? err.message : 'Unknown error'}`;
+  }
+}
+
+/**
+ * Load cumulative summary from assessment when treatment starts
+ */
+async function loadAssessmentSummary() {
+  try {
+    const assessment = await formEngine.getLatestInstanceBySession({
+      schemaId: 'peds_respiratory',
+      sessionId: sessionId.value
+    });
+    
+    if (assessment && assessment.status === 'completed') {
+      // Build a summary from the assessment answers
+      const answers = assessment.answers || {};
+      const summaryParts: string[] = [];
+      
+      // Add patient info
+      if (answers.patient_name) summaryParts.push(`Patient: ${answers.patient_name}`);
+      if (answers.patient_age_months) summaryParts.push(`Age: ${answers.patient_age_months} months`);
+      
+      // Add triage info
+      if (assessment.calculated?.triagePriority) {
+        summaryParts.push(`Triage: ${assessment.calculated.triagePriority.toUpperCase()}`);
+      }
+      
+      // Add key findings
+      const dangerSigns = [];
+      if (answers.convulsions) dangerSigns.push('convulsions');
+      if (answers.vomits_everything) dangerSigns.push('vomits everything');
+      if (answers.unable_to_drink) dangerSigns.push('unable to drink');
+      if (answers.lethargic_unconscious) dangerSigns.push('lethargic/unconscious');
+      if (dangerSigns.length > 0) summaryParts.push(`Danger signs: ${dangerSigns.join(', ')}`);
+      
+      // Add respiratory findings
+      if (answers.resp_rate) summaryParts.push(`RR: ${answers.resp_rate}/min`);
+      if (answers.oxygen_sat) summaryParts.push(`SpO2: ${answers.oxygen_sat}%`);
+      if (answers.retractions) summaryParts.push('Chest indrawing present');
+      if (answers.cyanosis) summaryParts.push('Cyanosis present');
+      
+      cumulativeSummary.value = summaryParts.join('. ') + '.';
+      console.log('[Treatment] Loaded assessment summary:', cumulativeSummary.value);
+    }
+  } catch (err) {
+    console.warn('[Treatment] Could not load assessment summary:', err);
   }
 }
 
@@ -690,6 +932,7 @@ watch(formValues, () => {
 onMounted(async () => {
   await loadSessionData();
   await buildExplainabilityFromAssessment();
+  await loadAssessmentSummary(); // Load cumulative summary from assessment
 });
 </script>
 
@@ -905,7 +1148,7 @@ onMounted(async () => {
           Caregiver Education
         </h3>
         <button
-          v-if="!caregiverEducation && !isGeneratingEducation"
+          v-if="!caregiverEducation && !isGeneratingEducation && !isStreamingEducation"
           @click="generateCaregiverEducation"
           class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
         >
@@ -914,10 +1157,30 @@ onMounted(async () => {
           </svg>
           Generate Explanation
         </button>
+        <button
+          v-if="isStreamingEducation"
+          @click="cancelEducationGeneration"
+          class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          Cancel
+        </button>
       </div>
       
-      <!-- Loading State -->
-      <div v-if="isGeneratingEducation" class="flex items-center gap-3 text-gray-400">
+      <!-- Streaming Panel (Phase 2) -->
+      <AIStreamingPanel
+        v-if="isStreamingEducation"
+        :is-streaming="isStreamingEducation"
+        :streaming-text="streamingEducationText"
+        :progress-percent="streamingEducationProgress"
+        :tokens-generated="0"
+        model-version="medgemma"
+      />
+      
+      <!-- Loading State (Fallback) -->
+      <div v-else-if="isGeneratingEducation" class="flex items-center gap-3 text-gray-400">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
         </svg>
@@ -941,6 +1204,19 @@ onMounted(async () => {
       <div v-else class="text-gray-400 text-sm">
         <p>Generate a plain-language explanation of the patient's condition and treatment plan for caregivers.</p>
       </div>
+    </div>
+    
+    <!-- Treatment Explainability Card (Phase 2.1) -->
+    <div v-if="explainabilityRecord" class="mb-6">
+      <ExplainabilityCard :model="explainabilityRecord" />
+    </div>
+    
+    <!-- Adherence Risk Indicator (Phase 2.1 Task 2.1.3) -->
+    <div v-if="riskResult" class="mb-6">
+      <AdherenceRiskIndicator 
+        :risk-result="riskResult" 
+        :show-recommendations="true"
+      />
     </div>
 
     <!-- Main Content -->
@@ -1013,6 +1289,47 @@ onMounted(async () => {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
             <span class="text-sm font-medium">This section requires immediate attention</span>
+          </div>
+        </div>
+        
+        <!-- MedGemma Section Guidance -->
+        <div class="mt-6 mb-6">
+          <!-- Ask MedGemma Button -->
+          <button
+            @click="askMedGemmaForSection"
+            :disabled="isStreamingSection"
+            class="w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg v-if="isStreamingSection" class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            {{ isStreamingSection ? 'MedGemma Thinking...' : 'Ask MedGemma for Guidance' }}
+          </button>
+          
+          <!-- Streaming Response Panel -->
+          <div v-if="isStreamingSection || streamingSectionResponse" class="mt-4 bg-gray-700/50 rounded-lg p-4 border border-gray-600">
+            <!-- Progress Bar -->
+            <div v-if="isStreamingSection && streamingSectionProgress < 100" class="mb-3">
+              <div class="flex justify-between text-xs text-gray-400 mb-1">
+                <span>Generating guidance...</span>
+                <span>{{ Math.round(streamingSectionProgress) }}%</span>
+              </div>
+              <div class="w-full bg-gray-600 rounded-full h-1.5">
+                <div 
+                  class="bg-gradient-to-r from-purple-500 to-blue-500 h-1.5 rounded-full transition-all duration-300"
+                  :style="{ width: `${streamingSectionProgress}%` }"
+                ></div>
+              </div>
+            </div>
+            
+            <!-- Response Text -->
+            <div v-if="streamingSectionResponse" class="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap">
+              {{ streamingSectionResponse }}
+            </div>
           </div>
         </div>
         

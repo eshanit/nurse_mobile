@@ -352,26 +352,16 @@ onMounted(() => {
                 'bg-blue-900/50': section.color === 'primary'
               }"
             >
-              <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                class="h-4 w-4"
+              <TWIcon 
+                :name="section.icon"
+                size="sm"
                 :class="{
                   'text-red-400': section.color === 'error',
                   'text-yellow-400': section.color === 'warning',
                   'text-green-400': section.color === 'success',
                   'text-blue-400': section.color === 'primary'
                 }"
-                fill="none" 
-                viewBox="0 0 24 24" 
-                stroke="currentColor"
-              >
-                <path 
-                  stroke-linecap="round" 
-                  stroke-linejoin="round" 
-                  stroke-width="2" 
-                  :d="section.icon" 
-                />
-              </svg>
+              />
             </div>
             <div>
               <h3 class="font-semibold text-white">{{ section.label }}</h3>

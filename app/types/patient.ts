@@ -93,7 +93,8 @@ export const PatientRegistrationDataSchema = z.object({
   insuranceInfo: InsuranceInfoSchema.optional(),
   medicalHistory: z.array(MedicalHistoryEntrySchema).optional(),
   allergies: z.array(AllergySchema).optional(),
-  medications: z.array(MedicationSchema).optional()
+  medications: z.array(MedicationSchema).optional(),
+  weightKg: z.number().min(0.5, 'Weight must be at least 0.5kg').max(500, 'Weight must be less than 500kg').optional()
 });
 
 /**
@@ -143,6 +144,9 @@ export interface ClinicalPatient {
   lastName: string;
   dateOfBirth?: string;
   gender?: PatientGender;
+  
+  /** Vitals - optional weight in kilograms */
+  weightKg?: number;
   
   /** Contact information */
   phone?: string;
@@ -253,6 +257,53 @@ export function calculateAge(dateOfBirth: string): number {
   }
   
   return age;
+}
+
+/**
+ * Calculate age in months from date of birth
+ * Returns a human-readable format: "X months" or "X years Y months"
+ */
+export function calculateAgeInMonths(dateOfBirth: string): string {
+  const dob = new Date(dateOfBirth);
+  const today = new Date();
+  
+  // Calculate total months
+  let totalMonths = (today.getFullYear() - dob.getFullYear()) * 12 + (today.getMonth() - dob.getMonth());
+  
+  // Adjust for days if needed
+  if (today.getDate() < dob.getDate()) {
+    totalMonths--;
+  }
+  
+  // Ensure non-negative
+  const months = Math.max(0, totalMonths);
+  
+  if (months < 12) {
+    return `${months} month${months !== 1 ? 's' : ''} old`;
+  } else {
+    const years = Math.floor(months / 12);
+    const remainingMonths = months % 12;
+    if (remainingMonths === 0) {
+      return `${years} year${years !== 1 ? 's' : ''} old`;
+    }
+    return `${years} year${years !== 1 ? 's' : ''} ${remainingMonths} month${remainingMonths !== 1 ? 's' : ''} old`;
+  }
+}
+
+/**
+ * Get age in months as a number for calculations
+ */
+export function getAgeMonthsNumeric(dateOfBirth: string): number {
+  const dob = new Date(dateOfBirth);
+  const today = new Date();
+  
+  const totalMonths = (today.getFullYear() - dob.getFullYear()) * 12 + (today.getMonth() - dob.getMonth());
+  
+  if (today.getDate() < dob.getDate()) {
+    return Math.max(0, totalMonths - 1);
+  }
+  
+  return Math.max(0, totalMonths);
 }
 
 /**

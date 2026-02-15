@@ -18,6 +18,7 @@ export interface AssessmentNavigationState {
     patientName?: string;
     dateOfBirth?: string;
     gender?: string;
+    weightKg?: number;  // Optional weight from registration
   } | null;
 }
 
@@ -41,6 +42,7 @@ export function useAssessmentNavigation() {
       patientName?: string;
       dateOfBirth?: string;
       gender?: string;
+      weightKg?: number;  // Optional weight from registration
     }
   ) {
     navigationState.value = {

@@ -10,7 +10,7 @@
  * - Clinical workflow enforcement
  */
 
-import { ref, computed, shallowRef, type Ref, type ComputedRef } from 'vue';
+import { ref, computed, shallowRef, triggerRef, type Ref, type ComputedRef } from 'vue';
 import { formEngine } from '@/services/formEngine';
 import { updateSessionTriage } from '@/services/sessionEngine';
 import { bridgeAssessmentToTreatment } from '@/services/treatmentBridge';
@@ -132,7 +132,7 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
       if (options.formId && options.formId !== 'new') {
         // Load existing instance
         newInstance = await formEngine.loadInstance(options.formId);
-        console.log('[useClinicalFormEngine] Loaded existing instance:', newInstance._id);
+        console.log('[useClinicalFormEngine] Loaded existing instance:', newInstance._id, 'sessionId:', newInstance.sessionId);
       } else {
         // Create new instance
         newInstance = await formEngine.createInstance(
@@ -143,6 +143,7 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
         // Associate with session if provided
         if (options.sessionId && newInstance) {
           newInstance.sessionId = options.sessionId;
+          console.log('[useClinicalFormEngine] Associated new instance with sessionId:', options.sessionId);
         }
         
         // Pre-populate with patient data if provided (from session)
@@ -177,11 +178,13 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
           }
           
           // Save the instance with pre-populated data
+          console.log('[useClinicalFormEngine] Saving new instance with sessionId:', newInstance.sessionId);
           await formEngine.saveInstance(newInstance);
         }
       }
       
       instance.value = newInstance;
+      console.log('[useClinicalFormEngine] Instance ready, sessionId:', instance.value?.sessionId);
       
       // Initialize form state from instance answers
       formState.value = { ...newInstance.answers };
@@ -263,6 +266,12 @@ export function useClinicalFormEngine(options: UseClinicalFormEngineOptions): Us
       // 3. Update local state
       instance.value = result.formInstance;
       formState.value = { ...result.formInstance.answers };
+      
+      // Force reactivity for computed properties that depend on instance.value
+      // This is needed because shallowRef doesn't track nested mutations
+      triggerRef(instance);
+      
+      console.log('[useClinicalFormEngine] triggerRef called, instance answers:', instance.value?.answers);
       
       // 4. Call custom save handler if provided
       if (options.onSave) {

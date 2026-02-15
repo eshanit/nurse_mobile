@@ -14,6 +14,16 @@
         <span v-if="progressPercentage > 0" class="progress-badge">
           {{ Math.round(progressPercentage) }}%
         </span>
+        <button 
+          v-if="showAskMedGemma"
+          class="ask-medgemma-btn"
+          :disabled="isAskMedGemmaDisabled"
+          @click.stop="$emit('ask-medgemma')"
+          title="Ask MedGemma for guidance"
+        >
+          <span class="medgemma-icon">🧠</span>
+          <span class="medgemma-text">Ask MedGemma</span>
+        </button>
         <button class="collapse-toggle" :aria-label="isCollapsed ? 'Expand section' : 'Collapse section'">
           {{ isCollapsed ? '▼' : '▲' }}
         </button>
@@ -56,6 +66,8 @@ interface Props {
   isComplete?: boolean;
   hasErrors?: boolean;
   showFooter?: boolean;
+  showAskMedGemma?: boolean;
+  isAskMedGemmaDisabled?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -65,12 +77,15 @@ const props = withDefaults(defineProps<Props>(), {
   isCollapsed: false,
   isComplete: false,
   hasErrors: false,
-  showFooter: true
+  showFooter: true,
+  showAskMedGemma: false,
+  isAskMedGemmaDisabled: false
 });
 
 const emit = defineEmits<{
   (e: 'toggle'): void;
   (e: 'complete'): void;
+  (e: 'ask-medgemma'): void;
 }>();
 
 const isCollapsedInternal = ref(props.isCollapsed);
@@ -193,6 +208,40 @@ function toggleCollapse() {
   color: var(--text-secondary, #666);
   cursor: pointer;
   padding: 4px 8px;
+}
+
+.ask-medgemma-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+}
+
+.ask-medgemma-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+}
+
+.ask-medgemma-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ask-medgemma-btn .medgemma-icon {
+  font-size: 14px;
+}
+
+.ask-medgemma-btn .medgemma-text {
+  white-space: nowrap;
 }
 
 .section-content {

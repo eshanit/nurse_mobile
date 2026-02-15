@@ -32,6 +32,8 @@ function getPriorityLabel(priority: Priority): string {
   }[priority];
 }
 
+export { getPriorityLabel, formatValue, generateId };
+
 export async function buildExplainabilityModel(
   assessment: ClinicalFormInstance,
   options: { sessionId: string; useAI?: boolean } = { sessionId: '' }

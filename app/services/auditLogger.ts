@@ -366,6 +366,89 @@ export function logDataExport(
   );
 }
 
+/**
+ * AI Interaction Details interface
+ * Extended per system-ai-json-draft.md specification
+ * Updated for Phase 1 structured responses
+ */
+export interface AIInteractionDetails {
+  useCase: 
+    | 'EXPLAIN_TRIAGE'
+    | 'INCONSISTENCY_CHECK'
+    | 'SUGGEST_ACTIONS'
+    | 'TREATMENT_ADVICE'
+    | 'CAREGIVER_INSTRUCTIONS'
+    | 'CLINICAL_NARRATIVE'
+    | 'CARE_EDUCATION'
+    | 'CLINICAL_HANDOVER'
+    | 'NOTE_SUMMARY';
+  modelVersion: string;
+  responseTime: number;
+  confidence: number;
+  inputTokens: number;
+  outputTokens: number;
+  safetyFlags: string[];
+  nurseAction?: 'viewed' | 'dismissed' | 'followed' | 'overridden';
+  // Phase 1: Structured response fields
+  inconsistenciesDetected?: number;
+  teachingNotesProvided?: number;
+  nextStepsProvided?: number;
+  ruleIdsReferenced?: string[];
+  requestId?: string;
+}
+
+/**
+ * Log AI interaction for clinical decision support
+ * Enhanced for Phase 1 with structured response tracking
+ */
+export function logAIInteraction(
+  sessionId: string,
+  interaction: AIInteractionDetails,
+  outcome: 'success' | 'failure' = 'success'
+): AuditEvent {
+  return logAuditEvent(
+    'ai_interaction',
+    interaction.safetyFlags.length > 0 ? 'warning' : 'info',
+    'medgemma',
+    {
+      sessionId,
+      ...interaction,
+      timestamp: new Date().toISOString(),
+      // Phase 1: Add structured response metrics
+      structuredResponse: {
+        inconsistenciesCount: interaction.inconsistenciesDetected || 0,
+        teachingNotesCount: interaction.teachingNotesProvided || 0,
+        nextStepsCount: interaction.nextStepsProvided || 0,
+        rulesReferenced: interaction.ruleIdsReferenced?.length || 0
+      }
+    },
+    outcome
+  );
+}
+
+/**
+ * Log AI error or fallback
+ */
+export function logAIError(
+  sessionId: string,
+  useCase: string,
+  errorMessage: string
+): AuditEvent {
+  return logAuditEvent(
+    'ai_interaction',
+    'error',
+    'medgemma',
+    {
+      sessionId,
+      useCase,
+      error: errorMessage,
+      fallbackUsed: true,
+      timestamp: new Date().toISOString()
+    },
+    'failure'
+  );
+}
+
 // ============================================
 // Query Functions
 // ============================================

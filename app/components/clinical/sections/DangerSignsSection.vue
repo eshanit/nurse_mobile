@@ -8,7 +8,10 @@
     :is-complete="isComplete"
     :has-errors="hasDangerSigns"
     :is-collapsed="isCollapsed"
+    :show-ask-med-gemma="showAskMedGemma"
+    :is-ask-med-gemma-disabled="isAskMedGemmaDisabled"
     @toggle="emit('toggle')"
+    @ask-medgemma="emit('ask-medgemma')"
   >
     <div class="danger-signs-container">
       <div v-if="hasDangerSigns" class="danger-banner">
@@ -82,19 +85,24 @@ interface Props {
   answers: Record<string, boolean>;
   isCollapsed?: boolean;
   showImciGuidance?: boolean;
+  showAskMedGemma?: boolean;
+  isAskMedGemmaDisabled?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   title: 'General Danger Signs',
   description: 'Check for general danger signs requiring urgent attention',
   isCollapsed: false,
-  showImciGuidance: true
+  showImciGuidance: true,
+  showAskMedGemma: false,
+  isAskMedGemmaDisabled: false
 });
 
 const emit = defineEmits<{
   (e: 'update:answer', fieldId: string, value: boolean): void;
   (e: 'toggle'): void;
   (e: 'danger-sign-detected', count: number): void;
+  (e: 'ask-medgemma'): void;
 }>();
 
 const localAnswers = computed(() => props.answers);

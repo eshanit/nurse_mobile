@@ -137,6 +137,27 @@
           
           <div class="form-row">
             <div class="form-group">
+              <label for="weightKg">
+                Weight <span class="optional-badge">Optional</span>
+              </label>
+              <div class="input-with-unit">
+                <input
+                  id="weightKg"
+                  v-model="form.weightKg"
+                  type="number"
+                  step="0.1"
+                  min="0.5"
+                  max="500"
+                  class="form-input"
+                  placeholder="e.g., 12.5"
+                  @input="handleWeightInput"
+                />
+                <span class="input-unit">kg</span>
+              </div>
+              <span class="field-hint">Enter weight in kilograms (0.5 - 500 kg)</span>
+            </div>
+            
+            <div class="form-group">
               <label for="phone">Phone Number</label>
               <input
                 id="phone"
@@ -151,6 +172,7 @@
                 {{ errors.phone }}
               </span>
             </div>
+          </div>
             
             <div class="form-group">
               <label for="email">Email Address</label>
@@ -481,6 +503,18 @@ function handleDateOfBirthInput(): void {
 }
 
 /**
+ * Handle weight input
+ */
+function handleWeightInput(): void {
+  // Clear any weight-related errors if we add them later
+  // For now, just validate the format
+  const weight = parseFloat(form.weightKg);
+  if (form.weightKg && (isNaN(weight) || weight < 0.5 || weight > 500)) {
+    // Could set an error here if needed
+  }
+}
+
+/**
  * Handle phone input
  */
 function handlePhoneInput(): void {
@@ -752,6 +786,32 @@ async function registerNewPatient(): Promise<void> {
 
 .submit-button {
   min-width: 160px;
+}
+
+/* Weight input styling */
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.input-with-unit .form-input {
+  padding-right: 3rem;
+  flex: 1;
+}
+
+.input-unit {
+  position: absolute;
+  right: 0.75rem;
+  color: #6b7280;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
 }
 
 /* Responsive */
